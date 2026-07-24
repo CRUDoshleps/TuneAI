@@ -1,0 +1,132 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: tuneai
+      POSTGRES_USER: tuneai
+      POSTGRES_PASSWORD: tuneai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tuneai -d tuneai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: postgresql+psycopg://tuneai:tuneai@postgres:5432/tuneai
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      UPLOAD_DIR: /data/uploads
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:5173,http://127.0.0.1:5173
+      CORS_ALLOW_CREDENTIALS: "true"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: postgresql+psycopg://tuneai:tuneai@postgres:5432/tuneai
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      UPLOAD_DIR: /data/uploads
+    command: python -m app.worker
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  seed:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: postgresql+psycopg://tuneai:tuneai@postgres:5432/tuneai
+      UPLOAD_DIR: /data/uploads
+    command: python -m app.scripts.seed_demo
+    profiles:
+      - demo
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      backend:
+        condition: service_started
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  minio-data:
+  uploads:

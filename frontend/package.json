@@ -1,0 +1,29 @@
+{
+  "name": "tuneai-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "next": "^16.2.11",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "^16.2.11",
+    "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "postcss": "8.5.22",
+    "sharp": "0.35.3"
+  }
+}
