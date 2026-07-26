@@ -73,10 +73,8 @@ pytest
 python scripts/demo_smoke.py
 ```
 
-Локально пройдены 26 backend-тестов, production-сборка frontend, Docker health-check и сквозной сценарий с реальными SpeechKit, Embeddings и YandexGPT. Подробности — в [отчёте о проверке](docs/CONFERENCE_TEST_REPORT.md).
+Локально пройдены 26 backend-тестов, production-сборка frontend, Docker health-check и сквозной сценарий с реальными SpeechKit, Embeddings и YandexGPT.
 
 ## Стек
 
 Next.js, FastAPI, PostgreSQL, RabbitMQ, Docker Compose, Yandex SpeechKit, Yandex Text Embeddings и YandexGPT.
-
-Материалы для заявки: [план развития](docs/CONFERENCE_READINESS_PLAN.md) и [черновик описания проекта](docs/SUBMISSION_DRAFT.md).
