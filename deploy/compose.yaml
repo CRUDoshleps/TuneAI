@@ -41,13 +41,12 @@ services:
     image: rabbitmq:4.1.8-alpine
     user: rabbitmq
     hostname: rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: tuneai
-      RABBITMQ_DEFAULT_PASS_FILE: /run/secrets/rabbitmq_password
+    entrypoint: ["/usr/local/bin/tuneai-rabbitmq-entrypoint"]
     secrets:
       - rabbitmq_password
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - /srv/apps/tuneai/deploy/rabbitmq-entrypoint.sh:/usr/local/bin/tuneai-rabbitmq-entrypoint:ro
     tmpfs:
       - /tmp:size=32m,mode=1777
     networks:
