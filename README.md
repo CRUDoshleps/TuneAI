@@ -67,12 +67,6 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Полный демонстрационный сценарий после запуска сервисов:
-
-```bash
-python scripts/demo_smoke.py
-```
-
 Локально пройдены 26 backend-тестов, production-сборка frontend, Docker health-check и сквозной сценарий с реальными SpeechKit, Embeddings и YandexGPT.
 
 ## Стек
