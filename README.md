@@ -2,7 +2,7 @@
 
 Тренажёр устных ответов для подготовки к экзаменам и интервью. Студент отвечает голосом, а TuneAI расшифровывает ответ, сверяет его с учебными материалами и объясняет оценку по критериям преподавателя.
 
-**Онлайн-версия:** `https://tuneai.<production-domain>` — заменим ссылку после развёртывания.
+**Онлайн-версия:** [tuneai.vnshk.ru](https://tuneai.vnshk.ru)
 
 ![Главная страница TuneAI](docs/screenshots/landing.png)
 
@@ -67,7 +67,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Локально пройдены 26 backend-тестов, production-сборка frontend, Docker health-check и сквозной сценарий с реальными SpeechKit, Embeddings и YandexGPT.
+Локально пройдены 27 backend-тестов, production-сборка frontend, Docker health-check и сквозной сценарий с реальными SpeechKit, Embeddings и YandexGPT.
 
 ## Стек
 
