@@ -6,7 +6,7 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -15,12 +15,14 @@
     "react-dom": "19.0.0"
   },
   "devDependencies": {
+    "@next/eslint-plugin-next": "^16.2.12",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
-    "eslint": "^9.17.0",
-    "eslint-config-next": "^16.2.11",
-    "typescript": "^5.7.2"
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.65.0"
   },
   "overrides": {
     "postcss": "8.5.22",

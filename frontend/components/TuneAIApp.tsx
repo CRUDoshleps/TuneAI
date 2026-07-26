@@ -111,7 +111,6 @@ function formatJobStatus(status: string) {
 
 export default function TuneAIApp() {
   const [token, setToken] = useState<string>("");
-  const [refreshToken, setRefreshToken] = useState<string>("");
   const [user, setUser] = useState<User | null>(null);
   const [mode, setMode] = useState<"login" | "register">("register");
   const [tests, setTests] = useState<Test[]>([]);
@@ -131,12 +130,15 @@ export default function TuneAIApp() {
 
   useEffect(() => {
     const savedToken = localStorage.getItem("tuneai_access") || "";
-    const savedRefresh = localStorage.getItem("tuneai_refresh") || "";
-    setToken(savedToken);
-    setRefreshToken(savedRefresh);
-    if (savedToken) {
-      loadMe(savedToken).catch(() => clearAuth());
-    }
+    const restoreSession = window.setTimeout(() => {
+      setToken(savedToken);
+      if (savedToken) {
+        loadMe(savedToken).catch(() => clearAuth());
+      }
+    }, 0);
+    return () => window.clearTimeout(restoreSession);
+    // Session restoration must run once per mount; loadMe receives the saved token explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -155,6 +157,8 @@ export default function TuneAIApp() {
       }
     }, 2500);
     return () => window.clearInterval(timer);
+    // Polling is restarted by attempt or token changes; the loader receives the active token explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, token]);
 
   const canCreateTests =
@@ -187,6 +191,8 @@ export default function TuneAIApp() {
     if (selectedTest && canManageSelectedTest && token) {
       loadMaterials(selectedTest.id).catch(() => setMaterials([]));
     }
+    // Reload only when the selected test identity, access, or token changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTest?.id, canManageSelectedTest, token]);
 
   function canManageTest(test: Test) {
@@ -262,14 +268,12 @@ export default function TuneAIApp() {
     localStorage.setItem("tuneai_access", pair.access_token);
     localStorage.setItem("tuneai_refresh", pair.refresh_token);
     setToken(pair.access_token);
-    setRefreshToken(pair.refresh_token);
   }
 
   function clearAuth() {
     localStorage.removeItem("tuneai_access");
     localStorage.removeItem("tuneai_refresh");
     setToken("");
-    setRefreshToken("");
     setUser(null);
     setTests([]);
     setSelectedTest(null);
