@@ -54,11 +54,13 @@ class Settings(BaseSettings):
     yandex_lite_model_uri: str | None = None
     yandex_embed_doc_uri: str | None = None
     yandex_embed_query_uri: str | None = None
-    yandex_completion_url: str = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-    yandex_embedding_url: str = "https://llm.api.cloud.yandex.net/foundationModels/v1/textEmbedding"
+    yandex_completion_url: str = "https://ai.api.cloud.yandex.net/foundationModels/v1/completion"
+    yandex_embedding_url: str = "https://ai.api.cloud.yandex.net/foundationModels/v1/textEmbedding"
     speechkit_recognize_url: str = "https://stt.api.cloud.yandex.net/stt/v3/recognizeFileAsync"
     speechkit_operation_url: str = "https://operation.api.cloud.yandex.net/operations"
+    speechkit_result_url: str = "https://stt.api.cloud.yandex.net/stt/v3/getRecognition"
     yandex_data_logging_enabled: bool = False
+    review_confidence_threshold: float = Field(default=0.75, ge=0, le=1)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -108,14 +110,14 @@ class Settings(BaseSettings):
         if self.yandex_embed_doc_uri:
             return self.yandex_embed_doc_uri
         folder = self.yandex_folder_id or "<folder_ID>"
-        return f"emb://{folder}/text-embeddings-v2-doc/"
+        return f"emb://{folder}/text-search-doc/latest"
 
     @property
     def embed_query_uri(self) -> str:
         if self.yandex_embed_query_uri:
             return self.yandex_embed_query_uri
         folder = self.yandex_folder_id or "<folder_ID>"
-        return f"emb://{folder}/text-embeddings-v2-query/"
+        return f"emb://{folder}/text-search-query/latest"
 
 
 @lru_cache

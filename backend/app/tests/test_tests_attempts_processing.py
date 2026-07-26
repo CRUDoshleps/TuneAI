@@ -117,6 +117,10 @@ async def test_audio_upload_creates_outbox_event_and_processing_completes(client
     assert payload["status"] == "completed"
     assert payload["answers"][0]["transcript"]
     assert payload["answers"][0]["evaluation"]["confidence"] >= 0
+    assert payload["answers"][0]["evaluation"]["grounded"] is True
+    assert payload["answers"][0]["evaluation"]["source_excerpts"]
+    assert payload["answers"][0]["evaluation"]["review_recommended"] is True
+    assert payload["answers"][0]["evaluation"]["evaluation_version"] == "tuneai-rubric-v1"
 
     dashboard = client.get("/admin/dashboard", headers=auth_header(admin_token))
     assert dashboard.status_code == 200
@@ -130,6 +134,93 @@ async def test_audio_upload_creates_outbox_event_and_processing_completes(client
     failed_jobs = client.get("/admin/failed-jobs", headers=auth_header(admin_token))
     assert failed_jobs.status_code == 200
     assert failed_jobs.json() == []
+
+
+@pytest.mark.asyncio
+async def test_teacher_reviews_low_confidence_answer_and_overrides_attempt_total(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    teacher_response = client.post(
+        "/users",
+        headers=auth_header(admin_token),
+        json={
+            "email": "teacher@example.com",
+            "full_name": "Review Teacher",
+            "password": "password123",
+            "role": "teacher",
+        },
+    )
+    assert teacher_response.status_code == 201, teacher_response.text
+    teacher_token = register_and_login(client, "teacher@example.com")
+    test = create_sample_test(client, teacher_token)
+    material = client.post(
+        "/materials",
+        headers=auth_header(teacher_token),
+        json={
+            "test_id": test["id"],
+            "title": "Review material",
+            "content": "Transactional outbox atomically saves an event with business data before publishing it.",
+        },
+    )
+    assert material.status_code == 201, material.text
+
+    student_token = register_and_login(client, "student@example.com")
+    attempt_response = client.post(
+        "/attempts",
+        headers=auth_header(student_token),
+        json={"test_id": test["id"]},
+    )
+    assert attempt_response.status_code == 201, attempt_response.text
+    attempt = attempt_response.json()
+    upload = client.post(
+        f"/attempts/{attempt['id']}/questions/{test['questions'][0]['id']}/audio",
+        headers=auth_header(student_token),
+        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm;codecs=opus")},
+    )
+    assert upload.status_code == 201, upload.text
+    answer_id = upload.json()["answers"][0]["id"]
+    with SessionLocal() as db:
+        await process_answer_uploaded(db, answer_id=answer_id)
+
+    forbidden_queue = client.get("/attempts/review-queue", headers=auth_header(student_token))
+    assert forbidden_queue.status_code == 403
+
+    queue = client.get("/attempts/review-queue", headers=auth_header(teacher_token))
+    assert queue.status_code == 200, queue.text
+    assert len(queue.json()) == 1
+    assert queue.json()[0]["answer_id"] == answer_id
+    assert queue.json()[0]["confidence"] == 0.72
+
+    excessive = client.patch(
+        f"/attempts/{attempt['id']}/answers/{answer_id}/review",
+        headers=auth_header(teacher_token),
+        json={"score": 11, "feedback": "Too high"},
+    )
+    assert excessive.status_code == 422
+    assert excessive.json()["detail"] == "Review score exceeds maximum"
+
+    reviewed = client.patch(
+        f"/attempts/{attempt['id']}/answers/{answer_id}/review",
+        headers=auth_header(teacher_token),
+        json={"score": 7.5, "feedback": "Зачтено после проверки преподавателем."},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["review_score"] == 7.5
+    assert reviewed.json()["reviewed_by_id"] == teacher_response.json()["id"]
+    assert reviewed.json()["reviewed_at"]
+
+    student_result = client.get(f"/attempts/{attempt['id']}", headers=auth_header(student_token))
+    assert student_result.status_code == 200
+    assert student_result.json()["total_score"] == 7.5
+    assert student_result.json()["answers"][0]["review_feedback"].startswith("Зачтено")
+
+    history = client.get("/attempts", headers=auth_header(student_token))
+    assert history.status_code == 200
+    assert history.json()[0]["id"] == attempt["id"]
+    assert history.json()[0]["answers"][0]["review_score"] == 7.5
+
+    empty_queue = client.get("/attempts/review-queue", headers=auth_header(teacher_token))
+    assert empty_queue.status_code == 200
+    assert empty_queue.json() == []
 
 
 def test_questions_are_hidden_until_attempt_reveals_them(client):

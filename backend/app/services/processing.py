@@ -66,6 +66,11 @@ async def process_answer_uploaded(
             rag_context=context,
             max_score=question.max_score,
         )
+        result.source_excerpts = context[:3]
+        result.grounded = bool(context)
+        result.review_recommended = (
+            result.confidence < ai.settings.review_confidence_threshold or not result.grounded
+        )
         answer.evaluation = result.model_dump()
         answer.score = result.score
         answer.max_score = result.max_score
@@ -90,7 +95,10 @@ def _refresh_attempt_totals(db: Session, attempt: Attempt) -> None:
         return
     if any(answer.status != AnswerStatusEnum.completed for answer in answers):
         return
-    attempt.total_score = sum(answer.score or 0 for answer in answers)
+    attempt.total_score = sum(
+        answer.review_score if answer.review_score is not None else (answer.score or 0)
+        for answer in answers
+    )
     attempt.max_score = sum(answer.max_score or 0 for answer in answers)
     attempt.status = AttemptStatusEnum.completed
     attempt.completed_at = datetime.now(timezone.utc)

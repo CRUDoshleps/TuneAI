@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import init_db
 from app.metrics import REQUESTS, metrics_response
+from app.schemas import AIReadiness
 
 
 configure_logging()
@@ -81,6 +82,26 @@ def health() -> dict[str, str]:
 @app.get("/readiness", tags=["system"])
 def readiness() -> dict[str, str]:
     return {"status": "ready"}
+
+
+@app.get("/readiness/ai", response_model=AIReadiness, tags=["system"])
+def ai_readiness() -> AIReadiness:
+    has_credentials = bool(settings.yandex_api_key or settings.yandex_iam_token)
+    configured = settings.yandex_mock or bool(has_credentials and settings.yandex_folder_id)
+    mode = "mock" if settings.yandex_mock else "real"
+    disclosure = (
+        "Демонстрационный режим: ответы AI воспроизводимы и не отправляются во внешние модели."
+        if settings.yandex_mock
+        else "Рабочий режим: аудио и текст обрабатываются сервисами Yandex AI Studio."
+    )
+    return AIReadiness(
+        status="ready" if configured else "configuration_required",
+        mode=mode,
+        configured=configured,
+        capabilities=["SpeechKit STT", "YandexGPT", "Text Embeddings", "RAG"],
+        review_confidence_threshold=settings.review_confidence_threshold,
+        disclosure=disclosure,
+    )
 
 
 @app.get("/metrics", include_in_schema=False)

@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.models import AnswerStatusEnum, AttemptStatusEnum, RoleEnum, TestStatusEnum, TestTypeEnum
 
@@ -125,6 +125,10 @@ class AnswerRead(BaseModel):
     evaluation: dict[str, Any] | None = None
     score: float | None = None
     max_score: float | None = None
+    review_score: float | None = None
+    review_feedback: str | None = None
+    reviewed_by_id: str | None = None
+    reviewed_at: datetime | None = None
     error_message: str | None = None
 
     model_config = {"from_attributes": True}
@@ -154,6 +158,46 @@ class EvaluationResult(BaseModel):
     feedback: str
     recommendations: str
     confidence: float = Field(ge=0, le=1)
+    source_excerpts: list[str] = Field(default_factory=list)
+    grounded: bool = False
+    review_recommended: bool = False
+    evaluation_version: str = "tuneai-rubric-v1"
+
+    @model_validator(mode="after")
+    def keep_score_within_rubric(self) -> "EvaluationResult":
+        self.score = min(self.score, self.max_score)
+        self.source_excerpts = [excerpt.strip()[:600] for excerpt in self.source_excerpts if excerpt.strip()][:3]
+        return self
+
+
+class AIReadiness(BaseModel):
+    status: Literal["ready", "configuration_required"]
+    mode: Literal["mock", "real"]
+    configured: bool
+    provider: str = "Yandex AI Studio"
+    capabilities: list[str]
+    review_confidence_threshold: float
+    disclosure: str
+
+
+class AnswerReviewRequest(BaseModel):
+    score: float = Field(ge=0)
+    feedback: str = Field(min_length=3, max_length=4000)
+
+
+class ReviewQueueItem(BaseModel):
+    answer_id: str
+    attempt_id: str
+    test_title: str
+    question_text: str
+    student_email: str
+    transcript: str
+    ai_score: float
+    max_score: float
+    confidence: float
+    ai_feedback: str
+    source_excerpts: list[str]
+    created_at: datetime
 
 
 class MaterialCreate(BaseModel):
