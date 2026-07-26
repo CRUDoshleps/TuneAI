@@ -39,6 +39,7 @@ services:
   rabbitmq:
     <<: *security
     image: rabbitmq:4.1.8-alpine
+    user: rabbitmq
     hostname: rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: tuneai
