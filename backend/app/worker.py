@@ -40,11 +40,16 @@ async def publish_outbox_once() -> int:
 
 async def publisher_loop() -> None:
     while True:
-        await publish_outbox_once()
+        try:
+            await publish_outbox_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("outbox_loop_failed")
         await asyncio.sleep(2)
 
 
-async def consume_answers() -> None:
+async def _consume_answers_once() -> None:
     connection = await aio_pika.connect_robust(settings.rabbitmq_url)
     async with connection:
         channel = await connection.channel()
@@ -59,6 +64,17 @@ async def consume_answers() -> None:
                         logger.warning("unknown_event", payload=payload)
                         continue
                     await handle_answer_message(payload)
+
+
+async def consume_answers() -> None:
+    while True:
+        try:
+            await _consume_answers_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("consumer_connection_failed", retry_in_seconds=2)
+            await asyncio.sleep(2)
 
 
 async def handle_answer_message(payload: dict) -> None:

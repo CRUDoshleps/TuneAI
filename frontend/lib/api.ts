@@ -11,6 +11,31 @@ export type AnswerStatus =
   | "completed"
   | "failed";
 
+export type Evaluation = {
+  score: number;
+  max_score: number;
+  correct_points: string[];
+  mistakes: string[];
+  missing_points: string[];
+  feedback: string;
+  recommendations: string;
+  confidence: number;
+  source_excerpts: string[];
+  grounded: boolean;
+  review_recommended: boolean;
+  evaluation_version: string;
+};
+
+export type AIReadiness = {
+  status: "ready" | "configuration_required";
+  mode: "mock" | "real";
+  configured: boolean;
+  provider: string;
+  capabilities: string[];
+  review_confidence_threshold: number;
+  disclosure: string;
+};
+
 export type User = {
   id: string;
   email: string;
@@ -53,10 +78,29 @@ export type Answer = {
   question_id: string;
   status: AnswerStatus;
   transcript: string | null;
-  evaluation: Record<string, unknown> | null;
+  evaluation: Evaluation | null;
   score: number | null;
   max_score: number | null;
+  review_score: number | null;
+  review_feedback: string | null;
+  reviewed_by_id: string | null;
+  reviewed_at: string | null;
   error_message: string | null;
+};
+
+export type ReviewQueueItem = {
+  answer_id: string;
+  attempt_id: string;
+  test_title: string;
+  question_text: string;
+  student_email: string;
+  transcript: string;
+  ai_score: number;
+  max_score: number;
+  confidence: number;
+  ai_feedback: string;
+  source_excerpts: string[];
+  created_at: string;
 };
 
 export type Attempt = {
@@ -66,6 +110,8 @@ export type Attempt = {
   status: "started" | "processing" | "completed" | "failed";
   total_score: number | null;
   max_score: number | null;
+  started_at: string;
+  completed_at: string | null;
   answers: Answer[];
   questions: AttemptQuestion[];
 };
@@ -152,6 +198,10 @@ const detailMessages: Record<string, string> = {
   "Question is not revealed yet": "Этот вопрос пока закрыт. Отвечайте на вопросы по порядку.",
   "Question already has an answer": "Ответ на этот вопрос уже отправлен.",
   "Attempt not found": "Попытка не найдена.",
+  "Answer not found": "Ответ не найден.",
+  "Only test owner or admin can review answers": "Проверять ответ может только автор теста или администратор.",
+  "Only completed answers can be reviewed": "Ответ еще не готов к ручной проверке.",
+  "Review score exceeds maximum": "Итоговый балл не может быть выше максимума за вопрос.",
   "Test is not assigned to this user": "Этот экзамен не назначен вашему аккаунту.",
   "Only text material is supported": "Загрузите материал в формате TXT или Markdown.",
   "Unsupported audio type": "Формат записи не поддерживается. Попробуйте записать ответ еще раз.",

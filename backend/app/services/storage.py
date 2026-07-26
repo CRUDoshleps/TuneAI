@@ -11,7 +11,8 @@ class StorageService:
         self.settings = settings or get_settings()
 
     def validate_upload(self, upload: UploadFile, content: bytes) -> None:
-        if upload.content_type not in self.settings.allowed_audio_types:
+        normalized_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
+        if normalized_type not in self.settings.allowed_audio_types:
             raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported audio type")
         if len(content) > self.settings.max_upload_bytes:
             raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Audio file is too large")

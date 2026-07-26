@@ -28,12 +28,14 @@ import {
   Attempt,
   getUserErrorMessage,
   Material,
+  ReviewQueueItem,
   Test,
   User
 } from "../lib/api";
 
 type TokenPair = { access_token: string; refresh_token: string };
-type SectionId = "overview" | "take" | "builder" | "materials" | "admin";
+type SectionId = "overview" | "take" | "builder" | "materials" | "review" | "admin";
+type LandingScenario = "preparation" | "exam" | "interview";
 
 const ROLE_LABELS: Record<User["role"], string> = {
   admin: "Администратор",
@@ -115,14 +117,17 @@ export default function TuneAIApp() {
   const [tests, setTests] = useState<Test[]>([]);
   const [selectedTest, setSelectedTest] = useState<Test | null>(null);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const [attemptHistory, setAttemptHistory] = useState<Attempt[]>([]);
   const [adminDashboard, setAdminDashboard] = useState<AdminDashboard | null>(null);
   const [adminUsers, setAdminUsers] = useState<User[]>([]);
   const [adminAttempts, setAdminAttempts] = useState<AdminAttempt[]>([]);
   const [failedJobs, setFailedJobs] = useState<AdminFailedJob[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [status, setStatus] = useState<string>("Готово к работе");
   const [error, setError] = useState<string>("");
+  const [landingScenario, setLandingScenario] = useState<LandingScenario>("preparation");
 
   useEffect(() => {
     const savedToken = localStorage.getItem("tuneai_access") || "";
@@ -142,6 +147,9 @@ export default function TuneAIApp() {
       try {
         const nextAttempt = await apiFetch<Attempt>(`/attempts/${attempt.id}`, {}, token);
         setAttempt(nextAttempt);
+        if (nextAttempt.status === "completed" || nextAttempt.status === "failed") {
+          loadAttemptHistory(token).catch(() => undefined);
+        }
       } catch (err) {
         setError(getUserErrorMessage(err, "Не удалось обновить состояние попытки."));
       }
@@ -151,6 +159,8 @@ export default function TuneAIApp() {
 
   const canCreateTests =
     user?.role === "admin" || user?.role === "teacher" || user?.role === "interviewer" || user?.role === "student";
+  const canReviewAnswers =
+    user?.role === "admin" || user?.role === "teacher" || user?.role === "interviewer";
   const canManageSelectedTest = Boolean(
     user && selectedTest && (user.role === "admin" || selectedTest.owner_id === user.id)
   );
@@ -161,6 +171,7 @@ export default function TuneAIApp() {
     take: "Прохождение",
     builder: "Конструктор тестов",
     materials: "Настройка теста",
+    review: "Проверка ответов",
     admin: "Администрирование"
   }[activeSection];
   const activeSubtitle = {
@@ -168,6 +179,7 @@ export default function TuneAIApp() {
     take: "Выберите доступный тест и проходите вопросы по порядку.",
     builder: "Создавайте сценарии, вопросы и критерии проверки.",
     materials: "Добавляйте учебные материалы и назначайте участников.",
+    review: "Подтвердите или скорректируйте спорные оценки AI.",
     admin: "Контролируйте пользователей, попытки и ошибки обработки."
   }[activeSection];
 
@@ -184,17 +196,34 @@ export default function TuneAIApp() {
   async function loadMe(activeToken = token) {
     const me = await apiFetch<User>("/auth/me", {}, activeToken);
     setUser(me);
-    await loadTests(activeToken);
+    const availableTests = await loadTests(activeToken);
+    await loadAttemptHistory(activeToken, availableTests);
+    if (me.role === "admin" || me.role === "teacher" || me.role === "interviewer") {
+      await loadReviewQueue(activeToken);
+    }
     if (me.role === "admin") {
       await loadAdmin(activeToken);
     }
   }
 
-  async function loadTests(activeToken = token) {
+  async function loadTests(activeToken = token): Promise<Test[]> {
     const items = await apiFetch<Test[]>("/tests", {}, activeToken);
     setTests(items);
     if (!selectedTest && items.length) {
       setSelectedTest(items[0]);
+    }
+    return items;
+  }
+
+  async function loadAttemptHistory(activeToken = token, availableTests = tests) {
+    const items = await apiFetch<Attempt[]>("/attempts", {}, activeToken);
+    setAttemptHistory(items);
+    if (!attempt && items.length) {
+      setAttempt(items[0]);
+      const matchingTest = availableTests.find((test) => test.id === items[0].test_id);
+      if (matchingTest) {
+        setSelectedTest(matchingTest);
+      }
     }
   }
 
@@ -207,6 +236,11 @@ export default function TuneAIApp() {
     setAdminUsers(users);
     setAdminAttempts(attempts);
     setFailedJobs(failed);
+  }
+
+  async function loadReviewQueue(activeToken = token) {
+    const items = await apiFetch<ReviewQueueItem[]>("/attempts/review-queue", {}, activeToken);
+    setReviewQueue(items);
   }
 
   async function refreshAdminData() {
@@ -240,11 +274,13 @@ export default function TuneAIApp() {
     setTests([]);
     setSelectedTest(null);
     setAttempt(null);
+    setAttemptHistory([]);
     setAdminDashboard(null);
     setAdminUsers([]);
     setAdminAttempts([]);
     setFailedJobs([]);
     setMaterials([]);
+    setReviewQueue([]);
     setActiveSection("overview");
   }
 
@@ -482,6 +518,7 @@ export default function TuneAIApp() {
         token
       );
       setAttempt(nextAttempt);
+      setAttemptHistory((current) => [nextAttempt, ...current.filter((item) => item.id !== nextAttempt.id)]);
       setSelectedTest(test);
       setStatus("Попытка началась");
     } catch (err) {
@@ -496,7 +533,14 @@ export default function TuneAIApp() {
     setError("");
     try {
       const form = new FormData();
-      form.append("file", blob, "answer.webm");
+      const normalizedType = blob.type.split(";", 1)[0];
+      const extension =
+        normalizedType === "audio/ogg" ? "ogg" :
+        normalizedType === "audio/wav" ? "wav" :
+        normalizedType === "audio/mpeg" ? "mp3" :
+        normalizedType === "audio/mp4" ? "m4a" :
+        "webm";
+      form.append("file", blob, `answer.${extension}`);
       const nextAttempt = await apiFetch<Attempt>(
         `/attempts/${attempt.id}/questions/${questionId}/audio`,
         { method: "POST", body: form },
@@ -511,26 +555,102 @@ export default function TuneAIApp() {
     }
   }
 
+  async function reviewAnswer(
+    item: ReviewQueueItem,
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiFetch<Answer>(
+        `/attempts/${item.attempt_id}/answers/${item.answer_id}/review`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            score: Number(form.get("score")),
+            feedback: String(form.get("feedback") || "")
+          })
+        },
+        token
+      );
+      await loadReviewQueue();
+      if (attempt?.id === item.attempt_id) {
+        setAttempt(await apiFetch<Attempt>(`/attempts/${attempt.id}`, {}, token));
+      }
+      if (user?.role === "admin") {
+        await loadAdmin();
+      }
+      setStatus("Решение преподавателя сохранено");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось сохранить проверку преподавателя."));
+    }
+  }
+
+  const landingContent = {
+    preparation: {
+      label: "Подготовка",
+      eyebrow: "Подготовка к устным ответам",
+      title: "Научись отвечать, а не угадывать балл.",
+      description:
+        "TuneAI разбирает устный ответ по критериям преподавателя, показывает пробелы и подтверждает выводы фрагментами учебных материалов.",
+      action: "Начать подготовку"
+    },
+    exam: {
+      label: "Экзамены",
+      eyebrow: "Экзамены с контролем преподавателя",
+      title: "Проверяй устные ответы прозрачно.",
+      description:
+        "Система расшифровывает ответ, сверяет его с рубрикой и материалами курса, а спорные оценки направляет преподавателю на подтверждение.",
+      action: "Посмотреть возможности"
+    },
+    interview: {
+      label: "Интервью",
+      eyebrow: "Тренировка профессиональных интервью",
+      title: "Репетируй ответы до настоящего интервью.",
+      description:
+        "Отрабатывай профессиональные вопросы голосом и получай конкретную обратную связь: что уже убедительно, чего не хватает и что повторить.",
+      action: "Начать тренировку"
+    }
+  } satisfies Record<
+    LandingScenario,
+    { label: string; eyebrow: string; title: string; description: string; action: string }
+  >;
+  const activeLandingContent = landingContent[landingScenario];
+
   if (!user) {
     return (
       <main className="shell auth-shell">
         <section className="landing-card">
           <header className="landing-nav">
             <div className="logo-word">TuneAI</div>
-            <nav>
-              <span>Подготовка</span>
-              <span>Экзамены</span>
-              <span>Интервью</span>
+            <nav aria-label="Сценарии TuneAI">
+              {(Object.entries(landingContent) as Array<
+                [LandingScenario, (typeof landingContent)[LandingScenario]]
+              >).map(([scenario, content]) => (
+                <button
+                  type="button"
+                  className={landingScenario === scenario ? "active" : ""}
+                  aria-pressed={landingScenario === scenario}
+                  key={scenario}
+                  onClick={() => setLandingScenario(scenario)}
+                >
+                  {content.label}
+                </button>
+              ))}
             </nav>
             <button className="nav-pill" onClick={() => setMode("login")}>Войти</button>
           </header>
 
           <section className="landing-hero">
             <div className="hero-copy">
-              <h1>Устные ответы без лишней рутины.</h1>
-              <p>TuneAI помогает проводить тренировки, экзамены и интервью с голосовыми ответами и понятной обратной связью.</p>
+              <div className="eyebrow">{activeLandingContent.eyebrow}</div>
+              <h1>{activeLandingContent.title}</h1>
+              <p>{activeLandingContent.description}</p>
               <div className="hero-actions">
-                <button className="primary" onClick={() => setMode("register")}>Создать аккаунт</button>
+                <button className="primary" onClick={() => setMode("register")}>
+                  {activeLandingContent.action}
+                </button>
                 <button className="secondary" onClick={() => setMode("login")}>У меня есть аккаунт</button>
               </div>
             </div>
@@ -547,8 +667,14 @@ export default function TuneAIApp() {
                 <button className="primary" type="submit"><UserRound size={18} /> Продолжить</button>
               </form>
               {error && <p className="error">{error}</p>}
-              <div className="api-note"><Shield size={16} /> Безопасный режим проверки</div>
             </section>
+          </section>
+
+          <section className="ai-pipeline" aria-label="Как TuneAI проверяет ответ">
+            <div><span>01</span><strong>Голос</strong><small>Ответ с микрофона</small></div>
+            <div><span>02</span><strong>SpeechKit</strong><small>Точная расшифровка</small></div>
+            <div><span>03</span><strong>RAG</strong><small>Опора на материалы</small></div>
+            <div><span>04</span><strong>YandexGPT</strong><small>Объяснимая обратная связь</small></div>
           </section>
 
           <div className="brand-wordmark" aria-hidden="true">tuneai</div>
@@ -562,6 +688,7 @@ export default function TuneAIApp() {
     { id: "take", label: user.role === "examinee" ? "Экзамены" : "Прохождение", icon: <Play size={17} /> },
     ...(canCreateTests ? [{ id: "builder" as SectionId, label: "Конструктор", icon: <Plus size={17} /> }] : []),
     ...(manageableTests.length ? [{ id: "materials" as SectionId, label: "Настройка", icon: <Database size={17} /> }] : []),
+    ...(canReviewAnswers ? [{ id: "review" as SectionId, label: "Проверка", icon: <CheckCircle2 size={17} /> }] : []),
     ...(user.role === "admin" ? [{ id: "admin" as SectionId, label: "Админка", icon: <Shield size={17} /> }] : [])
   ];
 
@@ -598,23 +725,32 @@ export default function TuneAIApp() {
             <h2>{activeTitle}</h2>
             <p>{activeSubtitle}</p>
           </div>
-          <button
-            className="ghost"
-            onClick={() => {
-              setError("");
-              loadTests()
-                .then(() => {
-                  if (user.role === "admin") {
-                    return loadAdmin();
-                  }
-                  return undefined;
-                })
-                .then(() => setStatus("Данные обновлены"))
-                .catch((err) => setError(getUserErrorMessage(err, "Не удалось обновить данные.")));
-            }}
-          >
-            <Activity size={17} /> Обновить
-          </button>
+          <div className="topbar-actions">
+            <button
+              className="ghost"
+              onClick={() => {
+                setError("");
+                loadTests()
+                  .then(() => loadAttemptHistory())
+                  .then(() => {
+                    if (canReviewAnswers) {
+                      return loadReviewQueue();
+                    }
+                    return undefined;
+                  })
+                  .then(() => {
+                    if (user.role === "admin") {
+                      return loadAdmin();
+                    }
+                    return undefined;
+                  })
+                  .then(() => setStatus("Данные обновлены"))
+                  .catch((err) => setError(getUserErrorMessage(err, "Не удалось обновить данные.")));
+              }}
+            >
+              <Activity size={17} /> Обновить
+            </button>
+          </div>
         </header>
 
         {error && <div className="banner error">{error}</div>}
@@ -632,32 +768,48 @@ export default function TuneAIApp() {
         )}
 
         {activeSection === "take" && (
-          <section className="flow-grid">
-            <TestPicker
-              title={user.role === "examinee" ? "Назначенные экзамены" : "Доступно для прохождения"}
-              tests={takableTests}
-              selectedTest={selectedTest}
-              emptyText={user.role === "examinee" ? "Пока нет назначенных экзаменов." : "Пока нет опубликованных тестов."}
-              onSelect={(test) => {
-                setSelectedTest(test);
-                setMaterials([]);
+          <div className="take-layout">
+            <section className="flow-grid">
+              <TestPicker
+                title={user.role === "examinee" ? "Назначенные экзамены" : "Доступно для прохождения"}
+                tests={takableTests}
+                selectedTest={selectedTest}
+                emptyText={user.role === "examinee" ? "Пока нет назначенных экзаменов." : "Пока нет опубликованных тестов."}
+                onSelect={(test) => {
+                  setSelectedTest(test);
+                  setMaterials([]);
+                  const latestForTest = attemptHistory.find((item) => item.test_id === test.id);
+                  setAttempt(latestForTest || null);
+                }}
+              />
+              <section className="panel flow-main">
+                {selectedTest ? (
+                  <TestRunner
+                    test={selectedTest}
+                    attempt={attempt?.test_id === selectedTest.id ? attempt : null}
+                    answers={attempt?.test_id === selectedTest.id ? attempt.answers : []}
+                    onStart={() => startAttempt(selectedTest)}
+                    onUpload={uploadRecording}
+                    onError={setError}
+                  />
+                ) : (
+                  <EmptyState title="Выберите тест" text="После выбора здесь появится текущий вопрос и запись ответа." />
+                )}
+              </section>
+            </section>
+            <AttemptHistory
+              attempts={attemptHistory}
+              tests={tests}
+              activeAttemptId={attempt?.id}
+              onOpen={(historyAttempt) => {
+                setAttempt(historyAttempt);
+                const matchingTest = tests.find((test) => test.id === historyAttempt.test_id);
+                if (matchingTest) {
+                  setSelectedTest(matchingTest);
+                }
               }}
             />
-            <section className="panel flow-main">
-              {selectedTest ? (
-                <TestRunner
-                  test={selectedTest}
-                  attempt={attempt}
-                  answers={attempt?.answers || []}
-                  onStart={() => startAttempt(selectedTest)}
-                  onUpload={uploadRecording}
-                  onError={setError}
-                />
-              ) : (
-                <EmptyState title="Выберите тест" text="После выбора здесь появится текущий вопрос и запись ответа." />
-              )}
-            </section>
-          </section>
+          </div>
         )}
 
         {activeSection === "builder" && canCreateTests && (
@@ -690,6 +842,18 @@ export default function TuneAIApp() {
             }}
             onUploadMaterial={uploadMaterial}
             onAssign={assignTest}
+          />
+        )}
+
+        {activeSection === "review" && canReviewAnswers && (
+          <ReviewPanel
+            items={reviewQueue}
+            onReview={reviewAnswer}
+            onRefresh={() => {
+              loadReviewQueue()
+                .then(() => setStatus("Очередь проверки обновлена"))
+                .catch((err) => setError(getUserErrorMessage(err, "Не удалось обновить очередь проверки.")));
+            }}
           />
         )}
 
@@ -742,7 +906,7 @@ function JourneyOverview({
         : [
             ["1", "Собрать тест", "builder"],
             ["2", "Настроить материалы", "materials"],
-            ["3", user.role === "admin" ? "Проверить мониторинг" : "Провести проверку", user.role === "admin" ? "admin" : "take"]
+            ["3", user.role === "admin" ? "Проверить мониторинг" : "Проверить ответы", user.role === "admin" ? "admin" : "review"]
           ];
 
   return (
@@ -1084,7 +1248,12 @@ function Recorder({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunksRef.current = [];
-      const options = MediaRecorder.isTypeSupported("audio/webm") ? { mimeType: "audio/webm" } : undefined;
+      const preferredType = [
+        "audio/ogg;codecs=opus",
+        "audio/webm;codecs=opus",
+        "audio/webm"
+      ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      const options = preferredType ? { mimeType: preferredType } : undefined;
       const recorder = new MediaRecorder(stream, options);
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -1093,7 +1262,8 @@ function Recorder({
       };
       recorder.onstop = async () => {
         setBusy(true);
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const recordedType = recorder.mimeType || chunksRef.current[0]?.type || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type: recordedType });
         try {
           await onUpload(blob);
         } catch (err) {
@@ -1132,15 +1302,219 @@ function AnswerStatusView({ answer }: { answer?: Answer }) {
   if (!answer) {
     return <p className="muted">Ответ еще не отправлен.</p>;
   }
-  const feedback = answer.evaluation?.feedback;
+  const evaluation = answer.evaluation;
   return (
     <div className="answer-status">
       <span className={`status-pill ${answer.status}`}>{ANSWER_STATUS_LABELS[answer.status]}</span>
-      {answer.score !== null && <strong>{answer.score} / {answer.max_score}</strong>}
+      {answer.score !== null && (
+        <strong>
+          {answer.review_score !== null ? answer.review_score : answer.score} / {answer.max_score}
+          {answer.review_score !== null ? " · итог преподавателя" : ""}
+        </strong>
+      )}
       {answer.transcript && <p><strong>Расшифровка:</strong> {answer.transcript}</p>}
-      {typeof feedback === "string" && feedback && <p><strong>Обратная связь:</strong> {feedback}</p>}
+      {evaluation && (
+        <section className="evaluation-report">
+          <div className="evaluation-head">
+            <div>
+              <small>Уверенность модели</small>
+              <strong>{Math.round(evaluation.confidence * 100)}%</strong>
+            </div>
+            <span className={evaluation.grounded ? "grounded" : "ungrounded"}>
+              {evaluation.grounded ? "Ответ сверен с материалами" : "Нет опоры на материалы"}
+            </span>
+          </div>
+
+          {evaluation.review_recommended && !answer.reviewed_at && (
+            <div className="review-callout">
+              <Shield size={18} />
+              <div>
+                <strong>Нужна проверка преподавателя</strong>
+                <p>Уверенность или качество источников ниже установленного порога. Не используйте этот балл как итоговый без человека.</p>
+              </div>
+            </div>
+          )}
+
+          {answer.reviewed_at && (
+            <div className="review-callout reviewed">
+              <CheckCircle2 size={18} />
+              <div>
+                <strong>Проверено преподавателем: {answer.review_score} / {answer.max_score}</strong>
+                <p>{answer.review_feedback}</p>
+              </div>
+            </div>
+          )}
+
+          <p><strong>Обратная связь:</strong> {evaluation.feedback}</p>
+          <div className="feedback-columns">
+            <FeedbackList title="Что получилось" items={evaluation.correct_points} tone="positive" />
+            <FeedbackList title="Что исправить" items={[...evaluation.mistakes, ...evaluation.missing_points]} tone="attention" />
+          </div>
+          <p><strong>Следующий шаг:</strong> {evaluation.recommendations}</p>
+
+          {evaluation.source_excerpts.length > 0 && (
+            <div className="evidence-list">
+              <strong><FileText size={16} /> Источники, использованные при проверке</strong>
+              {evaluation.source_excerpts.map((excerpt, index) => (
+                <blockquote key={`${index}-${excerpt.slice(0, 24)}`}>
+                  <span>{index + 1}</span>
+                  {excerpt}
+                </blockquote>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
       {answer.error_message && <p className="error">{formatProcessingError(answer.error_message)}</p>}
     </div>
+  );
+}
+
+function FeedbackList({
+  title,
+  items,
+  tone
+}: {
+  title: string;
+  items: string[];
+  tone: "positive" | "attention";
+}) {
+  return (
+    <div className={`feedback-list ${tone}`}>
+      <strong>{title}</strong>
+      {items.length ? (
+        <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>
+      ) : (
+        <p className="muted">Нет замечаний.</p>
+      )}
+    </div>
+  );
+}
+
+function AttemptHistory({
+  attempts,
+  tests,
+  activeAttemptId,
+  onOpen
+}: {
+  attempts: Attempt[];
+  tests: Test[];
+  activeAttemptId?: string;
+  onOpen: (attempt: Attempt) => void;
+}) {
+  if (!attempts.length) {
+    return null;
+  }
+  const titles = new Map(tests.map((test) => [test.id, test.title]));
+  return (
+    <section className="panel attempt-history">
+      <div className="panel-title"><ClipboardList size={18} /> Мои последние попытки</div>
+      <div className="attempt-history-list">
+        {attempts.map((item) => (
+          <button
+            key={item.id}
+            className={activeAttemptId === item.id ? "active" : ""}
+            onClick={() => onOpen(item)}
+          >
+            <span>
+              <strong>{titles.get(item.test_id) || "Тест"}</strong>
+              <small>{new Date(item.started_at).toLocaleString("ru-RU")}</small>
+            </span>
+            <span>
+              {ATTEMPT_STATUS_LABELS[item.status]}
+              {item.total_score !== null ? ` · ${item.total_score}/${item.max_score}` : ""}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReviewPanel({
+  items,
+  onReview,
+  onRefresh
+}: {
+  items: ReviewQueueItem[];
+  onReview: (item: ReviewQueueItem, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="review-workspace">
+      <div className="panel review-summary">
+        <div>
+          <small>Human-in-the-loop</small>
+          <h3>{items.length ? `${items.length} ответ(а) ждут решения` : "Очередь разобрана"}</h3>
+          <p>Проверяйте только отмеченные системой спорные ответы. AI-балл сохраняется отдельно от итогового решения.</p>
+        </div>
+        <button className="ghost" onClick={onRefresh}><Activity size={17} /> Обновить очередь</button>
+      </div>
+
+      {items.length ? (
+        <div className="review-grid">
+          {items.map((item) => (
+            <article className="panel review-card" key={item.answer_id}>
+              <div className="review-card-head">
+                <div>
+                  <small>{item.test_title} · {item.student_email}</small>
+                  <h3>{item.question_text}</h3>
+                </div>
+                <span className="status-pill evaluating">
+                  AI: {item.ai_score}/{item.max_score} · {Math.round(item.confidence * 100)}%
+                </span>
+              </div>
+
+              <div className="review-evidence">
+                <p><strong>Расшифровка:</strong> {item.transcript}</p>
+                <p><strong>Комментарий AI:</strong> {item.ai_feedback}</p>
+                {item.source_excerpts.length > 0 && (
+                  <details>
+                    <summary>Показать использованные источники ({item.source_excerpts.length})</summary>
+                    {item.source_excerpts.map((source, index) => (
+                      <blockquote key={`${item.answer_id}-${index}`}>{source}</blockquote>
+                    ))}
+                  </details>
+                )}
+              </div>
+
+              <form className="review-form" onSubmit={(event) => onReview(item, event)}>
+                <label>
+                  Итоговый балл
+                  <input
+                    name="score"
+                    type="number"
+                    min="0"
+                    max={item.max_score}
+                    step="0.1"
+                    defaultValue={item.ai_score}
+                    required
+                  />
+                </label>
+                <label>
+                  Комментарий преподавателя
+                  <textarea
+                    name="feedback"
+                    rows={3}
+                    minLength={3}
+                    placeholder="Что зачтено, что нужно исправить и почему изменен или подтвержден балл"
+                    required
+                  />
+                </label>
+                <button className="primary" type="submit">
+                  <CheckCircle2 size={17} /> Сохранить итог
+                </button>
+              </form>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title="Спорных ответов нет"
+          text="Здесь появятся завершенные ответы с низкой уверенностью или недостаточной опорой на материалы."
+        />
+      )}
+    </section>
   );
 }
 

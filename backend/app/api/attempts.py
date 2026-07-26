@@ -1,9 +1,11 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_roles
 from app.metrics import ANSWERS_CREATED
 from app.models import (
     Answer,
@@ -18,7 +20,15 @@ from app.models import (
     User,
     new_id,
 )
-from app.schemas import AnswerRead, AttemptQuestionRead, AttemptRead, AttemptStartRequest
+from app.schemas import (
+    AnswerRead,
+    AnswerReviewRequest,
+    AttemptQuestionRead,
+    AttemptRead,
+    AttemptStartRequest,
+    ReviewQueueItem,
+)
+from app.services.processing import _refresh_attempt_totals
 from app.services.outbox import ANSWER_UPLOADED, add_outbox_event
 from app.services.storage import StorageService
 
@@ -44,6 +54,67 @@ def start_attempt(
     db.commit()
     db.refresh(attempt)
     return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
+
+
+@router.get("", response_model=list[AttemptRead])
+def list_my_attempts(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[AttemptRead]:
+    attempts = list(
+        db.scalars(
+            select(Attempt)
+            .where(Attempt.user_id == user.id)
+            .options(selectinload(Attempt.answers), selectinload(Attempt.test))
+            .order_by(Attempt.started_at.desc())
+            .limit(20)
+        ).all()
+    )
+    return [_serialize_attempt(db, attempt, user) for attempt in attempts]
+
+
+@router.get("/review-queue", response_model=list[ReviewQueueItem])
+def review_queue(
+    db: Session = Depends(get_db),
+    reviewer: User = Depends(require_roles(RoleEnum.admin, RoleEnum.teacher, RoleEnum.interviewer)),
+) -> list[ReviewQueueItem]:
+    answers = list(
+        db.scalars(
+            select(Answer)
+            .where(Answer.status == AnswerStatusEnum.completed, Answer.reviewed_at.is_(None))
+            .options(
+                selectinload(Answer.question),
+                selectinload(Answer.attempt).selectinload(Attempt.user),
+                selectinload(Answer.attempt).selectinload(Attempt.test),
+            )
+            .order_by(Answer.created_at.desc())
+            .limit(200)
+        ).all()
+    )
+    rows: list[ReviewQueueItem] = []
+    for answer in answers:
+        if reviewer.role != RoleEnum.admin and answer.attempt.test.owner_id != reviewer.id:
+            continue
+        evaluation = answer.evaluation or {}
+        if not evaluation.get("review_recommended"):
+            continue
+        rows.append(
+            ReviewQueueItem(
+                answer_id=answer.id,
+                attempt_id=answer.attempt_id,
+                test_title=answer.attempt.test.title,
+                question_text=answer.question.text,
+                student_email=answer.attempt.user.email,
+                transcript=answer.transcript or "",
+                ai_score=answer.score or 0,
+                max_score=answer.max_score or answer.question.max_score,
+                confidence=float(evaluation.get("confidence") or 0),
+                ai_feedback=str(evaluation.get("feedback") or ""),
+                source_excerpts=list(evaluation.get("source_excerpts") or [])[:3],
+                created_at=answer.created_at,
+            )
+        )
+    return rows[:100]
 
 
 @router.get("/{attempt_id}", response_model=AttemptRead)
@@ -100,6 +171,41 @@ async def upload_answer_audio(
     db.commit()
     ANSWERS_CREATED.inc()
     return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
+
+
+@router.patch("/{attempt_id}/answers/{answer_id}/review", response_model=AnswerRead)
+def review_answer(
+    attempt_id: str,
+    answer_id: str,
+    payload: AnswerReviewRequest,
+    db: Session = Depends(get_db),
+    reviewer: User = Depends(require_roles(RoleEnum.admin, RoleEnum.teacher, RoleEnum.interviewer)),
+) -> AnswerRead:
+    answer = db.scalar(
+        select(Answer)
+        .where(Answer.id == answer_id, Answer.attempt_id == attempt_id)
+        .options(selectinload(Answer.attempt).selectinload(Attempt.test))
+    )
+    if not answer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Answer not found")
+    if reviewer.role != RoleEnum.admin and answer.attempt.test.owner_id != reviewer.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only test owner or admin can review answers")
+    if answer.status != AnswerStatusEnum.completed:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only completed answers can be reviewed")
+    maximum = answer.max_score or answer.question.max_score
+    if payload.score > maximum:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Review score exceeds maximum")
+
+    answer.review_score = payload.score
+    answer.review_feedback = payload.feedback.strip()
+    answer.reviewed_by_id = reviewer.id
+    answer.reviewed_at = datetime.now(timezone.utc)
+    db.add(answer)
+    db.commit()
+    db.refresh(answer)
+    _refresh_attempt_totals(db, answer.attempt)
+    db.commit()
+    return AnswerRead.model_validate(answer)
 
 
 def _load_attempt(db: Session, attempt_id: str) -> Attempt:

@@ -32,12 +32,13 @@ class YandexAIClient:
         if self.settings.yandex_mock or not (self.settings.yandex_api_key or self.settings.yandex_iam_token):
             return "Mock transcript: the learner gives a partially correct spoken answer."
 
+        speechkit_audio, audio_format = await self._prepare_speechkit_audio(audio, content_type)
         body = {
-            "content": base64.b64encode(audio).decode("ascii"),
-            "recognition_model": {
+            "content": base64.b64encode(speechkit_audio).decode("ascii"),
+            "recognitionModel": {
                 "model": "general",
-                "audio_format": self._speechkit_audio_format(content_type),
-                "text_normalization": {"text_normalization": "TEXT_NORMALIZATION_ENABLED"},
+                "audioFormat": audio_format,
+                "textNormalization": {"textNormalization": "TEXT_NORMALIZATION_ENABLED"},
             },
         }
         async with httpx.AsyncClient(timeout=120) as client:
@@ -54,7 +55,15 @@ class YandexAIClient:
                 result.raise_for_status()
                 payload = result.json()
                 if payload.get("done"):
-                    return self._extract_transcript(payload.get("response", payload))
+                    recognition = await client.get(
+                        self.settings.speechkit_result_url,
+                        headers=self.auth_headers,
+                        params={"operation_id": operation_id},
+                    )
+                    recognition.raise_for_status()
+                    return self._extract_transcript(
+                        self._decode_json_stream(recognition.text)
+                    )
                 await asyncio.sleep(2)
         raise RuntimeError("SpeechKit recognition timed out")
 
@@ -89,7 +98,9 @@ class YandexAIClient:
             )
 
         system_prompt = (
-            "You are an expert examiner. Grade a spoken answer strictly against the rubric and source context. "
+            "You are an educational feedback assistant, not a replacement for a teacher. "
+            "Grade a spoken answer strictly against the rubric and source context. "
+            "Do not invent facts outside the supplied context. If evidence is insufficient, lower confidence. "
             "Return only valid JSON with fields: score, max_score, correct_points, mistakes, missing_points, "
             "feedback, recommendations, confidence."
         )
@@ -108,12 +119,39 @@ class YandexAIClient:
                 {"role": "system", "text": system_prompt},
                 {"role": "user", "text": json.dumps(user_prompt, ensure_ascii=False)},
             ],
+            "jsonSchema": {"schema": self._evaluation_response_schema()},
         }
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(self.settings.yandex_completion_url, headers=self.auth_headers, json=body)
             response.raise_for_status()
             text = self._extract_completion_text(response.json())
         return EvaluationResult.model_validate_json(self._extract_json(text))
+
+    @staticmethod
+    def _evaluation_response_schema() -> dict[str, Any]:
+        """Return the strict schema accepted by Yandex structured output.
+
+        Explainability and review fields are added deterministically by the
+        processing service, so the model should only generate grading fields.
+        Yandex requires every schema property to be listed as required.
+        """
+        generated_fields = [
+            "score",
+            "max_score",
+            "correct_points",
+            "mistakes",
+            "missing_points",
+            "feedback",
+            "recommendations",
+            "confidence",
+        ]
+        schema = EvaluationResult.model_json_schema()
+        schema["properties"] = {
+            field: schema["properties"][field] for field in generated_fields
+        }
+        schema["required"] = generated_fields
+        schema["additionalProperties"] = False
+        return schema
 
     async def _embed(self, text: str, model_uri: str) -> list[float]:
         if self.settings.yandex_mock or not (self.settings.yandex_api_key or self.settings.yandex_iam_token):
@@ -131,15 +169,48 @@ class YandexAIClient:
             raise RuntimeError("Yandex embedding response did not include an embedding")
         return [float(value) for value in embedding]
 
+    async def _prepare_speechkit_audio(
+        self, audio: bytes, content_type: str | None
+    ) -> tuple[bytes, dict[str, Any]]:
+        normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
+        if normalized_type in {"audio/wav", "audio/x-wav"}:
+            return audio, {"containerAudio": {"containerAudioType": "WAV"}}
+        if normalized_type == "audio/mpeg":
+            return audio, {"containerAudio": {"containerAudioType": "MP3"}}
+        if normalized_type in {"audio/ogg", "application/ogg"}:
+            return audio, {"containerAudio": {"containerAudioType": "OGG_OPUS"}}
+        if normalized_type in {"audio/webm", "video/webm", "audio/mp4", "video/mp4"}:
+            converted = await self._transcode_to_ogg(audio)
+            return converted, {"containerAudio": {"containerAudioType": "OGG_OPUS"}}
+        raise ValueError(f"Unsupported audio type for SpeechKit: {content_type or 'unknown'}")
+
     @staticmethod
-    def _speechkit_audio_format(content_type: str | None) -> dict[str, Any]:
-        if content_type == "audio/wav" or content_type == "audio/x-wav":
-            return {"container_audio": {"container_audio_type": "WAV"}}
-        if content_type == "audio/mpeg":
-            return {"container_audio": {"container_audio_type": "MP3"}}
-        if content_type == "audio/ogg":
-            return {"container_audio": {"container_audio_type": "OGG_OPUS"}}
-        return {"container_audio": {"container_audio_type": "WEBM_OPUS"}}
+    async def _transcode_to_ogg(audio: bytes) -> bytes:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                "pipe:0",
+                "-vn",
+                "-c:a",
+                "libopus",
+                "-f",
+                "ogg",
+                "pipe:1",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("ffmpeg is required to convert browser audio for SpeechKit") from exc
+        stdout, stderr = await process.communicate(audio)
+        if process.returncode != 0 or not stdout:
+            details = stderr.decode("utf-8", errors="replace")[-500:]
+            raise RuntimeError(f"Could not convert browser audio to OGG Opus: {details}")
+        return stdout
 
     @staticmethod
     def _extract_completion_text(payload: dict[str, Any]) -> str:
@@ -162,13 +233,41 @@ class YandexAIClient:
         return stripped[start : end + 1]
 
     @staticmethod
-    def _extract_transcript(payload: dict[str, Any]) -> str:
-        texts: list[str] = []
+    def _decode_json_stream(raw: str) -> list[Any]:
+        """Decode the concatenated JSON objects returned by SpeechKit v3."""
+        decoder = json.JSONDecoder()
+        position = 0
+        payloads: list[Any] = []
+        while position < len(raw):
+            while position < len(raw) and raw[position].isspace():
+                position += 1
+            if position >= len(raw):
+                break
+            payload, position = decoder.raw_decode(raw, position)
+            payloads.append(payload)
+        return payloads
+
+    @staticmethod
+    def _extract_transcript(payload: Any) -> str:
+        refined: list[str] = []
+        final: list[str] = []
+        generic: list[str] = []
 
         def walk(node: Any) -> None:
             if isinstance(node, dict):
                 if isinstance(node.get("text"), str):
-                    texts.append(node["text"])
+                    generic.append(node["text"])
+                refinement = node.get("finalRefinement")
+                if isinstance(refinement, dict):
+                    normalized = refinement.get("normalizedText", {})
+                    for alternative in normalized.get("alternatives", []):
+                        if isinstance(alternative.get("text"), str):
+                            refined.append(alternative["text"])
+                final_result = node.get("final")
+                if isinstance(final_result, dict):
+                    for alternative in final_result.get("alternatives", []):
+                        if isinstance(alternative.get("text"), str):
+                            final.append(alternative["text"])
                 for value in node.values():
                     walk(value)
             elif isinstance(node, list):
@@ -176,7 +275,7 @@ class YandexAIClient:
                     walk(item)
 
         walk(payload)
-        transcript = " ".join(dict.fromkeys(texts))
+        transcript = " ".join(dict.fromkeys(refined or final or generic))
         if not transcript:
             raise RuntimeError("SpeechKit response did not include transcript text")
         return transcript
