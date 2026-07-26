@@ -1,5 +1,6 @@
 deploy/*.sh text eol=lf
 deploy/*.service text eol=lf
+deploy/*.conf text eol=lf
 deploy/*.yaml text eol=lf
 deploy/Caddyfile text eol=lf
 backend/Dockerfile text eol=lf
