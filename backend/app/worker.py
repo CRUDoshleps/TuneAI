@@ -88,6 +88,7 @@ async def handle_answer_message(payload: dict) -> None:
 
 
 async def main() -> None:
+    settings.validate_production()
     init_db()
     await asyncio.gather(publisher_loop(), consume_answers())
 

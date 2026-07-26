@@ -7,6 +7,8 @@ __pycache__
 .pytest_cache
 .mypy_cache
 .ruff_cache
+.pnpm-store
+.tmp-ssh-cert
 node_modules
 frontend/node_modules
 frontend/.next

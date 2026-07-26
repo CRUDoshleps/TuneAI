@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import create_token, decode_token, hash_password, verify_password
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.deps import get_current_user
 from app.models import RoleEnum, User
@@ -18,7 +19,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered")
     user_count = db.scalar(select(func.count(User.id))) or 0
-    role = RoleEnum.admin if user_count == 0 else RoleEnum.student
+    settings = get_settings()
+    role = RoleEnum.admin if settings.app_env != "production" and user_count == 0 else RoleEnum.student
     user = User(
         email=payload.email.lower(),
         full_name=payload.full_name,

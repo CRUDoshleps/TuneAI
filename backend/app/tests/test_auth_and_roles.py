@@ -1,4 +1,5 @@
 from app.tests.conftest import auth_header, register_and_login
+from app.core.config import get_settings
 
 
 def test_first_registered_user_is_admin_and_can_create_staff_user(client):
@@ -77,3 +78,11 @@ def test_examinee_cannot_create_tests(client):
         },
     )
     assert response.status_code == 403
+
+
+def test_first_production_registration_is_student(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "app_env", "production")
+    token = register_and_login(client, "production@example.com")
+    me = client.get("/auth/me", headers=auth_header(token))
+    assert me.status_code == 200
+    assert me.json()["role"] == "student"

@@ -9,6 +9,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "local"
     secret_key: str = Field(default="dev-secret-change-me", min_length=16)
+    docs_enabled: bool = True
+    metrics_enabled: bool = True
+    init_db_on_startup: bool = True
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
     cors_origins: Annotated[list[str], NoDecode] = [
@@ -90,6 +93,21 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    def validate_production(self) -> None:
+        if self.app_env != "production":
+            return
+        errors: list[str] = []
+        if self.secret_key == "dev-secret-change-me":
+            errors.append("SECRET_KEY must be changed")
+        if self.yandex_mock:
+            errors.append("YANDEX_MOCK must be false")
+        if not (self.yandex_api_key or self.yandex_iam_token):
+            errors.append("Yandex credentials are required")
+        if not self.yandex_folder_id:
+            errors.append("YANDEX_FOLDER_ID is required")
+        if errors:
+            raise RuntimeError("Invalid production configuration: " + "; ".join(errors))
 
     @property
     def gpt_model_uri(self) -> str:

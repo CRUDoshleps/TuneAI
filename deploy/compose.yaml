@@ -1,0 +1,217 @@
+name: tuneai
+
+x-backend-environment: &backend-environment
+  APP_ENV: production
+  POSTGRES_HOST: ${POSTGRES_HOST:?POSTGRES_HOST is required}
+  YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:?YANDEX_FOLDER_ID is required}
+  YANDEX_MOCK: "false"
+  YANDEX_DATA_LOGGING_ENABLED: "false"
+  CORS_ORIGINS: https://tuneai.vnshk.ru
+  CORS_ALLOW_CREDENTIALS: "true"
+  DOCS_ENABLED: "false"
+  METRICS_ENABLED: "false"
+  INIT_DB_ON_STARTUP: "false"
+  STORAGE_BACKEND: local
+  UPLOAD_DIR: /data/uploads
+  MAX_UPLOAD_MB: "50"
+
+x-backend-secrets: &backend-secrets
+  - secret_key
+  - postgres_password
+  - rabbitmq_password
+  - yandex_api_key
+
+x-security: &security
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  init: true
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  rabbitmq:
+    <<: *security
+    image: rabbitmq:4.1-alpine
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: tuneai
+      RABBITMQ_DEFAULT_PASS_FILE: /run/secrets/rabbitmq_password
+    secrets:
+      - rabbitmq_password
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  backend:
+    <<: *security
+    image: ${REGISTRY_IMAGE:?REGISTRY_IMAGE is required}/backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    environment:
+      <<: *backend-environment
+    secrets: *backend-secrets
+    volumes:
+      - uploads:/data/uploads
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks:
+      - private
+      - egress
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readiness', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  worker:
+    <<: *security
+    image: ${REGISTRY_IMAGE:?REGISTRY_IMAGE is required}/backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-environment
+    secrets: *backend-secrets
+    volumes:
+      - uploads:/data/uploads
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    networks:
+      - private
+      - egress
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 768M
+
+  frontend:
+    <<: *security
+    image: ${REGISTRY_IMAGE:?REGISTRY_IMAGE is required}/frontend:${IMAGE_TAG:?IMAGE_TAG is required}
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    networks:
+      - private
+      edge:
+        aliases:
+          - tuneai-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  migrate:
+    image: ${REGISTRY_IMAGE:?REGISTRY_IMAGE is required}/backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *backend-environment
+    secrets: *backend-secrets
+    networks:
+      - private
+      - egress
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    profiles:
+      - tools
+
+  bootstrap-admin:
+    image: ${REGISTRY_IMAGE:?REGISTRY_IMAGE is required}/backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    command: ["python", "-m", "app.scripts.bootstrap_admin"]
+    environment:
+      <<: *backend-environment
+    secrets:
+      - secret_key
+      - postgres_password
+      - rabbitmq_password
+      - yandex_api_key
+      - bootstrap_admin_email
+      - bootstrap_admin_password
+    networks:
+      - private
+      - egress
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    profiles:
+      - tools
+
+networks:
+  private:
+    internal: true
+  egress:
+  edge:
+    external: true
+    name: platform-edge_default
+
+volumes:
+  rabbitmq-data:
+  uploads:
+
+secrets:
+  secret_key:
+    file: /run/apps/tuneai/secret_key
+  postgres_password:
+    file: /run/apps/tuneai/postgres_password
+  rabbitmq_password:
+    file: /run/apps/tuneai/rabbitmq_password
+  yandex_api_key:
+    file: /run/apps/tuneai/yandex_api_key
+  bootstrap_admin_email:
+    file: /run/apps/tuneai/bootstrap_admin_email
+  bootstrap_admin_password:
+    file: /run/apps/tuneai/bootstrap_admin_password

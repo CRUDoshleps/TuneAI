@@ -28,9 +28,16 @@ class YandexAIClient:
             headers["x-folder-id"] = self.settings.yandex_folder_id
         return headers
 
+    def _ensure_real_credentials(self) -> None:
+        if not (self.settings.yandex_api_key or self.settings.yandex_iam_token):
+            raise RuntimeError("Yandex AI credentials are not configured")
+        if not self.settings.yandex_folder_id:
+            raise RuntimeError("Yandex folder ID is not configured")
+
     async def transcribe_audio(self, audio: bytes, content_type: str | None) -> str:
-        if self.settings.yandex_mock or not (self.settings.yandex_api_key or self.settings.yandex_iam_token):
+        if self.settings.yandex_mock:
             return "Mock transcript: the learner gives a partially correct spoken answer."
+        self._ensure_real_credentials()
 
         speechkit_audio, audio_format = await self._prepare_speechkit_audio(audio, content_type)
         body = {
@@ -83,7 +90,7 @@ class YandexAIClient:
         rag_context: list[str],
         max_score: float,
     ) -> EvaluationResult:
-        if self.settings.yandex_mock or not (self.settings.yandex_api_key or self.settings.yandex_iam_token):
+        if self.settings.yandex_mock:
             confidence = 0.72
             score = max(1.0, round(max_score * 0.68, 2))
             return EvaluationResult(
@@ -96,6 +103,7 @@ class YandexAIClient:
                 recommendations="Repeat the relevant material and answer with a structured thesis, explanation, and example.",
                 confidence=confidence,
             )
+        self._ensure_real_credentials()
 
         system_prompt = (
             "You are an educational feedback assistant, not a replacement for a teacher. "
@@ -154,10 +162,11 @@ class YandexAIClient:
         return schema
 
     async def _embed(self, text: str, model_uri: str) -> list[float]:
-        if self.settings.yandex_mock or not (self.settings.yandex_api_key or self.settings.yandex_iam_token):
+        if self.settings.yandex_mock:
             digest = hashlib.sha256(text.encode("utf-8")).digest()
             values = [((digest[i % len(digest)] / 255.0) * 2) - 1 for i in range(64)]
             return values
+        self._ensure_real_credentials()
 
         body = {"modelUri": model_uri, "text": text[:8000]}
         async with httpx.AsyncClient(timeout=60) as client:

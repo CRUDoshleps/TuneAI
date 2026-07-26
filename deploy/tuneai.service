@@ -1,0 +1,19 @@
+[Unit]
+Description=TuneAI production stack
+Requires=docker.service tuneai-secrets.service
+After=docker.service tuneai-secrets.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/srv/apps/tuneai
+EnvironmentFile=/srv/apps/tuneai/deploy/.env.production
+ExecStart=/usr/bin/docker compose --project-name tuneai --file /srv/apps/tuneai/deploy/compose.yaml up -d
+ExecReload=/usr/bin/docker compose --project-name tuneai --file /srv/apps/tuneai/deploy/compose.yaml up -d
+ExecStop=/usr/bin/docker compose --project-name tuneai --file /srv/apps/tuneai/deploy/compose.yaml stop
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
