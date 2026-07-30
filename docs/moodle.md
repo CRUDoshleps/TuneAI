@@ -100,3 +100,29 @@ Moodle должен выставлять `grade` или `score/max_score` в Gra
 6. Moodle ставит сигнал преподавателю, если `review_required=true`.
 
 TuneAI принимает submissions только для опубликованных тестов.
+
+## E2E-проверка с Moodle в Docker
+
+Для локальной проверки можно поднять TuneAI, worker, RabbitMQ, PostgreSQL и настоящий Moodle-контейнер:
+
+```bash
+tests/moodle/run-moodle-e2e.sh
+```
+
+Сценарий:
+
+- поднимает отдельный compose project `tuneai-moodle-e2e`;
+- включает mock AI и Moodle integration token только для этого прогона;
+- ждет готовности backend и Moodle;
+- запускает PHP smoke-тест внутри Moodle-контейнера;
+- создает demo exam в TuneAI;
+- отправляет текстовый Moodle submission;
+- проверяет idempotency повтора;
+- дожидается результата worker pipeline;
+- валидирует `score`, `max_score`, `grade`, `feedback`, `confidence` и `teacher_signal`.
+
+После успешного или неуспешного прогона runner удаляет контейнеры и volumes. Чтобы оставить окружение для ручной диагностики:
+
+```bash
+KEEP_MOODLE_E2E=1 tests/moodle/run-moodle-e2e.sh
+```

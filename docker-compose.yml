@@ -65,6 +65,7 @@ services:
       RUNTIME_AI_PROVIDER_CONFIG_ENABLED: ${RUNTIME_AI_PROVIDER_CONFIG_ENABLED:-true}
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:5173,http://127.0.0.1:5173
       CORS_ALLOW_CREDENTIALS: "true"
+    entrypoint: []
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
@@ -106,6 +107,7 @@ services:
       MOODLE_INTEGRATION_ENABLED: ${MOODLE_INTEGRATION_ENABLED:-false}
       MOODLE_INTEGRATION_TOKEN: ${MOODLE_INTEGRATION_TOKEN:-}
       RUNTIME_AI_PROVIDER_CONFIG_ENABLED: ${RUNTIME_AI_PROVIDER_CONFIG_ENABLED:-true}
+    entrypoint: []
     command: python -m app.worker
     volumes:
       - uploads:/data/uploads
@@ -124,6 +126,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://tuneai:tuneai@postgres:5432/tuneai
       UPLOAD_DIR: /data/uploads
+    entrypoint: []
     command: python -m app.scripts.seed_demo
     profiles:
       - demo
