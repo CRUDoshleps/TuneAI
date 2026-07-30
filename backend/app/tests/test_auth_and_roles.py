@@ -80,6 +80,50 @@ def test_examinee_cannot_create_tests(client):
     assert response.status_code == 403
 
 
+def test_admin_can_ban_and_unban_user_but_not_self(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    created = client.post(
+        "/users",
+        headers=auth_header(admin_token),
+        json={
+            "email": "student@example.com",
+            "full_name": "Student User",
+            "password": "password123",
+            "role": "student",
+        },
+    )
+    assert created.status_code == 201, created.text
+    student = created.json()
+
+    banned = client.patch(
+        f"/users/{student['id']}",
+        headers=auth_header(admin_token),
+        json={"role": "student", "is_active": False},
+    )
+    assert banned.status_code == 200, banned.text
+    assert banned.json()["is_active"] is False
+
+    blocked_login = client.post("/auth/login", json={"email": "student@example.com", "password": "password123"})
+    assert blocked_login.status_code == 401
+
+    unbanned = client.patch(
+        f"/users/{student['id']}",
+        headers=auth_header(admin_token),
+        json={"role": "student", "is_active": True},
+    )
+    assert unbanned.status_code == 200, unbanned.text
+    assert unbanned.json()["is_active"] is True
+
+    admin = client.get("/auth/me", headers=auth_header(admin_token)).json()
+    self_ban = client.patch(
+        f"/users/{admin['id']}",
+        headers=auth_header(admin_token),
+        json={"role": "admin", "is_active": False},
+    )
+    assert self_ban.status_code == 422
+    assert self_ban.json()["detail"] == "Admin cannot deactivate own account"
+
+
 def test_first_production_registration_is_student(client, monkeypatch):
     monkeypatch.setattr(get_settings(), "app_env", "production")
     token = register_and_login(client, "production@example.com")

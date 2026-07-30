@@ -4,6 +4,8 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import {
   Activity,
   AlertTriangle,
+  Archive,
+  Ban,
   BarChart3,
   CheckCircle2,
   ClipboardList,
@@ -13,9 +15,12 @@ import {
   Mic,
   Play,
   Plus,
+  Search,
   Shield,
   Square,
+  Trash2,
   Upload,
+  UserCheck,
   UserRound,
   Users
 } from "lucide-react";
@@ -122,6 +127,8 @@ export default function TuneAIApp() {
   const [adminAttempts, setAdminAttempts] = useState<AdminAttempt[]>([]);
   const [failedJobs, setFailedJobs] = useState<AdminFailedJob[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [adminMaterials, setAdminMaterials] = useState<Material[]>([]);
+  const [adminMaterialTestId, setAdminMaterialTestId] = useState<string>("");
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [status, setStatus] = useState<string>("Готово к работе");
@@ -284,6 +291,8 @@ export default function TuneAIApp() {
     setAdminAttempts([]);
     setFailedJobs([]);
     setMaterials([]);
+    setAdminMaterials([]);
+    setAdminMaterialTestId("");
     setReviewQueue([]);
     setActiveSection("overview");
   }
@@ -474,6 +483,102 @@ export default function TuneAIApp() {
       formElement.reset();
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось создать пользователя."));
+    }
+  }
+
+  async function updateAdminUser(targetUser: User, updates: Partial<Pick<User, "role" | "is_active">>) {
+    setError("");
+    try {
+      await apiFetch<User>(
+        `/users/${targetUser.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            role: updates.role ?? targetUser.role,
+            is_active: updates.is_active ?? targetUser.is_active
+          })
+        },
+        token
+      );
+      await loadAdmin();
+      if (targetUser.id === user?.id) {
+        await loadMe();
+      }
+      setStatus("Пользователь обновлен");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось обновить пользователя."));
+    }
+  }
+
+  async function updateAdminTestStatus(test: Test, nextStatus: Test["status"]) {
+    setError("");
+    try {
+      await apiFetch<Test>(
+        `/tests/${test.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status: nextStatus })
+        },
+        token
+      );
+      const nextTests = await loadTests();
+      if (selectedTest?.id === test.id) {
+        setSelectedTest(nextTests.find((item) => item.id === test.id) || null);
+      }
+      await loadAdmin();
+      setStatus("Статус теста обновлен");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось обновить тест."));
+    }
+  }
+
+  async function deleteAdminTest(test: Test) {
+    setError("");
+    try {
+      await apiFetch(`/tests/${test.id}`, { method: "DELETE" }, token);
+      const nextTests = await loadTests();
+      if (selectedTest?.id === test.id) {
+        setSelectedTest(nextTests[0] || null);
+      }
+      if (adminMaterialTestId === test.id) {
+        setAdminMaterialTestId("");
+        setAdminMaterials([]);
+      }
+      await loadAdmin();
+      setStatus("Тест удален");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось удалить тест. Если по нему уже есть попытки, отправьте тест в архив."));
+    }
+  }
+
+  async function selectAdminMaterialTest(testId: string) {
+    setAdminMaterialTestId(testId);
+    setAdminMaterials([]);
+    if (!testId) {
+      return;
+    }
+    setError("");
+    try {
+      const items = await apiFetch<Material[]>(`/materials?test_id=${testId}`, {}, token);
+      setAdminMaterials(items);
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось загрузить материалы теста."));
+    }
+  }
+
+  async function deleteAdminMaterial(material: Material) {
+    setError("");
+    try {
+      await apiFetch(`/materials/${material.id}`, { method: "DELETE" }, token);
+      if (adminMaterialTestId) {
+        await selectAdminMaterialTest(adminMaterialTestId);
+      }
+      if (selectedTest?.id === material.test_id) {
+        await loadMaterials(material.test_id);
+      }
+      setStatus("Материал удален");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось удалить материал."));
     }
   }
 
@@ -868,8 +973,15 @@ export default function TuneAIApp() {
             tests={tests}
             attempts={adminAttempts}
             failedJobs={failedJobs}
+            materials={adminMaterials}
+            materialTestId={adminMaterialTestId}
             onRefresh={refreshAdminData}
             onCreateUser={createAdminUser}
+            onUpdateUser={updateAdminUser}
+            onUpdateTestStatus={updateAdminTestStatus}
+            onDeleteTest={deleteAdminTest}
+            onSelectMaterialTest={selectAdminMaterialTest}
+            onDeleteMaterial={deleteAdminMaterial}
           />
         )}
       </section>
@@ -1528,17 +1640,35 @@ function AdminPanel({
   tests,
   attempts,
   failedJobs,
+  materials,
+  materialTestId,
   onRefresh,
-  onCreateUser
+  onCreateUser,
+  onUpdateUser,
+  onUpdateTestStatus,
+  onDeleteTest,
+  onSelectMaterialTest,
+  onDeleteMaterial
 }: {
   dashboard: AdminDashboard | null;
   users: User[];
   tests: Test[];
   attempts: AdminAttempt[];
   failedJobs: AdminFailedJob[];
+  materials: Material[];
+  materialTestId: string;
   onRefresh: () => void;
   onCreateUser: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateUser: (user: User, updates: Partial<Pick<User, "role" | "is_active">>) => Promise<void>;
+  onUpdateTestStatus: (test: Test, status: Test["status"]) => Promise<void>;
+  onDeleteTest: (test: Test) => Promise<void>;
+  onSelectMaterialTest: (testId: string) => Promise<void>;
+  onDeleteMaterial: (material: Material) => Promise<void>;
 }) {
+  const [userQuery, setUserQuery] = useState("");
+  const [userStatus, setUserStatus] = useState<"all" | "active" | "blocked">("all");
+  const [testQuery, setTestQuery] = useState("");
+  const [testStatus, setTestStatus] = useState<"all" | Test["status"]>("all");
   const metrics = [
     ["Пользователи", dashboard?.users ?? 0],
     ["Тесты", dashboard?.tests ?? 0],
@@ -1547,10 +1677,29 @@ function AdminPanel({
     ["Ошибки ответов", dashboard?.answers_failed ?? 0],
     ["В очереди", dashboard?.outbox_pending ?? 0]
   ];
+  const normalizedUserQuery = userQuery.trim().toLowerCase();
+  const visibleUsers = users.filter((item) => {
+    const matchesStatus = userStatus === "all" || (userStatus === "active" ? item.is_active : !item.is_active);
+    const matchesQuery = `${item.full_name} ${item.email} ${ROLE_LABELS[item.role]}`.toLowerCase().includes(normalizedUserQuery);
+    return matchesStatus && matchesQuery;
+  });
+  const normalizedTestQuery = testQuery.trim().toLowerCase();
+  const visibleTests = tests.filter((item) => {
+    const matchesStatus = testStatus === "all" || item.status === testStatus;
+    const matchesQuery = `${item.title} ${TEST_TYPE_LABELS[item.test_type]} ${TEST_STATUS_LABELS[item.status]}`
+      .toLowerCase()
+      .includes(normalizedTestQuery);
+    return matchesStatus && matchesQuery;
+  });
+  const selectedMaterialTest = tests.find((item) => item.id === materialTestId);
+
   return (
     <section className="panel full-panel admin-panel">
       <div className="admin-head">
-        <div className="panel-title"><BarChart3 size={18} /> Администрирование</div>
+        <div>
+          <div className="panel-title"><BarChart3 size={18} /> Администрирование</div>
+          <p className="muted">Управление аккаунтами, тестами, материалами и операционным состоянием платформы.</p>
+        </div>
         <button className="ghost" onClick={onRefresh}><Activity size={17} /> Обновить данные</button>
       </div>
 
@@ -1579,23 +1728,140 @@ function AdminPanel({
       </div>
 
       <div className="admin-sections">
-        <AdminTable
-          icon={<Users size={17} />}
-          title="Пользователи"
-          headers={["Имя", "Email", "Роль", "Статус"]}
-          rows={users.map((item) => [item.full_name, item.email, ROLE_LABELS[item.role], item.is_active ? "Активен" : "Отключен"])}
-        />
-        <AdminTable
-          icon={<ClipboardList size={17} />}
-          title="Тесты"
-          headers={["Название", "Тип", "Статус", "Вопросы"]}
-          rows={tests.map((item) => [
-            item.title,
-            TEST_TYPE_LABELS[item.test_type],
-            TEST_STATUS_LABELS[item.status],
-            String(item.question_count || item.questions.length)
-          ])}
-        />
+        <section className="admin-table-wrap admin-wide">
+          <h3><Users size={17} /> Пользователи</h3>
+          <div className="admin-filters">
+            <label>
+              <Search size={15} />
+              <input value={userQuery} onChange={(event) => setUserQuery(event.target.value)} placeholder="Найти по имени, email или роли" />
+            </label>
+            <select value={userStatus} onChange={(event) => setUserStatus(event.target.value as typeof userStatus)}>
+              <option value="all">Все статусы</option>
+              <option value="active">Активные</option>
+              <option value="blocked">Заблокированные</option>
+            </select>
+          </div>
+          <AdminTable
+            title="Пользователи"
+            headers={["Имя", "Email", "Роль", "Статус", "Действия"]}
+            rows={visibleUsers.map((item) => [
+              item.full_name,
+              item.email,
+              <select
+                key={`role-${item.id}`}
+                value={item.role}
+                onChange={(event) => onUpdateUser(item, { role: event.target.value as User["role"] })}
+              >
+                <option value="examinee">Экзаменуемый</option>
+                <option value="student">Самоподготовка</option>
+                <option value="teacher">Преподаватель</option>
+                <option value="interviewer">Интервьюер</option>
+                <option value="candidate">Кандидат</option>
+                <option value="admin">Администратор</option>
+              </select>,
+              <span key={`status-${item.id}`} className={`status-pill ${item.is_active ? "completed" : "failed"}`}>
+                {item.is_active ? "Активен" : "Заблокирован"}
+              </span>,
+              <button
+                key={`active-${item.id}`}
+                className={item.is_active ? "danger" : "secondary"}
+                onClick={() => onUpdateUser(item, { is_active: !item.is_active })}
+              >
+                {item.is_active ? <Ban size={15} /> : <UserCheck size={15} />}
+                {item.is_active ? "Забанить" : "Разбанить"}
+              </button>
+            ])}
+            emptyText="Пользователи не найдены."
+          />
+        </section>
+
+        <section className="admin-table-wrap admin-wide">
+          <h3><ClipboardList size={17} /> Тесты</h3>
+          <div className="admin-filters">
+            <label>
+              <Search size={15} />
+              <input value={testQuery} onChange={(event) => setTestQuery(event.target.value)} placeholder="Найти по названию, типу или статусу" />
+            </label>
+            <select value={testStatus} onChange={(event) => setTestStatus(event.target.value as typeof testStatus)}>
+              <option value="all">Все статусы</option>
+              <option value="draft">Черновики</option>
+              <option value="published">Опубликованные</option>
+              <option value="archived">Архивные</option>
+            </select>
+          </div>
+          <AdminTable
+            title="Тесты"
+            headers={["Название", "Тип", "Статус", "Вопросы", "Действия"]}
+            rows={visibleTests.map((item) => [
+              item.title,
+              TEST_TYPE_LABELS[item.test_type],
+              <select
+                key={`test-status-${item.id}`}
+                value={item.status}
+                onChange={(event) => onUpdateTestStatus(item, event.target.value as Test["status"])}
+              >
+                <option value="draft">Черновик</option>
+                <option value="published">Опубликован</option>
+                <option value="archived">В архиве</option>
+              </select>,
+              String(item.question_count || item.questions.length),
+              <span key={`test-actions-${item.id}`} className="admin-actions">
+                <button className="secondary" onClick={() => onUpdateTestStatus(item, "archived")}>
+                  <Archive size={15} /> Архив
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    if (window.confirm("Удалить тест без возможности восстановления?")) {
+                      onDeleteTest(item);
+                    }
+                  }}
+                >
+                  <Trash2 size={15} /> Удалить
+                </button>
+              </span>
+            ])}
+            emptyText="Тесты не найдены."
+          />
+        </section>
+
+        <section className="admin-table-wrap admin-wide">
+          <h3><Database size={17} /> Материалы</h3>
+          <div className="admin-filters">
+            <select value={materialTestId} onChange={(event) => onSelectMaterialTest(event.target.value)}>
+              <option value="">Выберите тест</option>
+              {tests.map((item) => (
+                <option key={item.id} value={item.id}>{item.title}</option>
+              ))}
+            </select>
+            <button className="ghost" disabled={!materialTestId} onClick={() => onSelectMaterialTest(materialTestId)}>
+              <Activity size={15} /> Обновить материалы
+            </button>
+          </div>
+          {selectedMaterialTest && <p className="muted">Материалы теста: {selectedMaterialTest.title}</p>}
+          <AdminTable
+            title="Материалы"
+            headers={["Название", "Файл", "Добавлен", "Действия"]}
+            rows={materials.map((item) => [
+              item.title,
+              item.source_filename || "-",
+              new Date(item.created_at).toLocaleString("ru-RU"),
+              <button
+                key={`material-delete-${item.id}`}
+                className="danger"
+                onClick={() => {
+                  if (window.confirm("Удалить материал и его RAG-фрагменты?")) {
+                    onDeleteMaterial(item);
+                  }
+                }}
+              >
+                <Trash2 size={15} /> Удалить
+              </button>
+            ])}
+            emptyText={materialTestId ? "Материалы не найдены." : "Выберите тест, чтобы увидеть материалы."}
+          />
+        </section>
+
         <AdminTable
           icon={<CheckCircle2 size={17} />}
           title="Попытки"
@@ -1632,15 +1898,15 @@ function AdminTable({
   rows,
   emptyText = "Пока нет данных."
 }: {
-  icon: ReactNode;
+  icon?: ReactNode;
   title: string;
   headers: string[];
-  rows: string[][];
+  rows: ReactNode[][];
   emptyText?: string;
 }) {
   return (
-    <div className="admin-table-wrap">
-      <h3>{icon} {title}</h3>
+    <div className={icon ? "admin-table-wrap" : ""}>
+      {icon && <h3>{icon} {title}</h3>}
       {rows.length ? (
         <div className="table-scroll">
           <table>

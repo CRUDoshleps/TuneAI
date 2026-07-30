@@ -46,11 +46,15 @@ def update_user_role(
     user_id: str,
     payload: UserRoleUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(RoleEnum.admin)),
+    current_user: User = Depends(require_roles(RoleEnum.admin)),
 ) -> User:
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.id == current_user.id and payload.is_active is False:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Admin cannot deactivate own account")
+    if user.id == current_user.id and payload.role != RoleEnum.admin:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Admin cannot remove own admin role")
     user.role = payload.role
     if payload.is_active is not None:
         user.is_active = payload.is_active
@@ -58,4 +62,3 @@ def update_user_role(
     db.commit()
     db.refresh(user)
     return user
-

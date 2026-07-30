@@ -1124,6 +1124,42 @@ textarea {
   gap: 14px;
 }
 
+.admin-wide {
+  grid-column: 1 / -1;
+}
+
+.admin-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, auto);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.admin-filters label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-actions button,
+.admin-table-wrap td button {
+  min-height: 34px;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.admin-table-wrap td select {
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
 .admin-table-wrap {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1205,6 +1241,7 @@ td {
   .settings-form,
   .question-form,
   .assign-form,
+  .admin-filters,
   .admin-user-form {
     grid-template-columns: 1fr;
   }

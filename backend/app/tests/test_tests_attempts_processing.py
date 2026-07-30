@@ -297,6 +297,52 @@ def test_student_does_not_see_unassigned_published_self_training(client):
     assert forbidden_attempt.json()["detail"] == "Test is not assigned to this user"
 
 
+def test_admin_can_delete_material_and_empty_test(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    test = create_sample_test(client, admin_token)
+    material = client.post(
+        "/materials",
+        headers=auth_header(admin_token),
+        json={
+            "test_id": test["id"],
+            "title": "Temporary notes",
+            "content": "This material is long enough to be accepted and then removed by an administrator.",
+        },
+    )
+    assert material.status_code == 201, material.text
+
+    removed_material = client.delete(f"/materials/{material.json()['id']}", headers=auth_header(admin_token))
+    assert removed_material.status_code == 204, removed_material.text
+    materials = client.get(f"/materials?test_id={test['id']}", headers=auth_header(admin_token))
+    assert materials.status_code == 200
+    assert materials.json() == []
+
+    attempted = client.post(
+        "/attempts",
+        headers=auth_header(admin_token),
+        json={"test_id": test["id"]},
+    )
+    assert attempted.status_code == 201, attempted.text
+    blocked_delete = client.delete(f"/tests/{test['id']}", headers=auth_header(admin_token))
+    assert blocked_delete.status_code == 409
+    assert blocked_delete.json()["detail"] == "Test has attempts and cannot be deleted"
+
+    empty_test = client.post(
+        "/tests",
+        headers=auth_header(admin_token),
+        json={
+            "title": "Draft to delete",
+            "test_type": "self_training",
+            "questions": [{"text": "Can this be removed?", "max_score": 10}],
+        },
+    )
+    assert empty_test.status_code == 201, empty_test.text
+    deleted = client.delete(f"/tests/{empty_test.json()['id']}", headers=auth_header(admin_token))
+    assert deleted.status_code == 204, deleted.text
+    missing = client.get(f"/tests/{empty_test.json()['id']}", headers=auth_header(admin_token))
+    assert missing.status_code == 404
+
+
 def test_examinee_sees_only_assigned_exam_and_no_public_self_training(client):
     admin_token = register_and_login(client, "admin@example.com")
     self_training = create_two_question_test(client, admin_token)

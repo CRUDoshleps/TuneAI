@@ -64,8 +64,24 @@ async def upload_material(
     return material
 
 
+@router.delete("/{material_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_material(
+    material_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    material = db.get(Material, material_id)
+    if not material:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
+    test = db.get(Test, material.test_id)
+    if not test:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+    _ensure_manager(test, user)
+    db.delete(material)
+    db.commit()
+
+
 def _ensure_manager(test: Test, user: User) -> None:
     if user.role == RoleEnum.admin or test.owner_id == user.id:
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only owner or admin can manage materials")
-

@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.deps import can_create_tests, get_current_user
-from app.models import Assignment, Question, RoleEnum, Test, TestTypeEnum, User
+from app.models import Assignment, Attempt, Question, RoleEnum, Test, TestTypeEnum, User
 from app.schemas import AssignRequest, QuestionCreate, QuestionRead, TestCreate, TestRead, TestUpdate
 from app.services.moderation import censor_content, censor_text
 from app.services.test_visibility import can_manage_test, can_view_test
@@ -134,6 +134,21 @@ def assign_test(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already assigned") from None
+
+
+@router.delete("/{test_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_test(
+    test_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    test = _load_test(db, test_id)
+    _ensure_manager(test, user)
+    attempts_count = db.scalar(select(func.count(Attempt.id)).where(Attempt.test_id == test.id)) or 0
+    if attempts_count:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Test has attempts and cannot be deleted")
+    db.delete(test)
+    db.commit()
 
 
 def _load_test(db: Session, test_id: str) -> Test:
