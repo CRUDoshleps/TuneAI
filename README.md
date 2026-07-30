@@ -46,10 +46,12 @@
 - [Демо-сценарии](docs/demo.md)
 - [Self-host развертывание](docs/self-host.md)
 - [API для интеграций](docs/api.md)
+- [Интеграция во внешние сайты](docs/site-integration.md)
 - [Роли и права](docs/roles.md)
 - [RAG-материалы](docs/rag.md)
 - [AI Safety](docs/ai-safety.md)
 - [LMS-интеграции](docs/lms-integrations.md)
+- [Moodle-интеграция](docs/moodle.md)
 - [Roadmap](docs/roadmap.md)
 
 ## Как это работает
