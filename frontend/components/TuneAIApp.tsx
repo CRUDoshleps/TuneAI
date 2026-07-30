@@ -87,7 +87,8 @@ const MATERIAL_INDEX_LABELS: Record<Material["index_status"], string> = {
 const AI_PROVIDER_LABELS: Record<AIProviderConfig["provider"], string> = {
   mock: "Mock AI",
   yandex: "Yandex AI Studio",
-  openai_compatible: "OpenAI-compatible"
+  openai_compatible: "OpenAI-compatible",
+  local: "Локальная модель"
 };
 
 const ATTEMPT_STATUS_LABELS: Record<Attempt["status"], string> = {
@@ -2669,7 +2670,7 @@ function AIProviderManager({
         <span className={`status-pill ${activeProfile ? "completed" : "evaluating"}`}>
           {activeProfile ? `Активен: ${activeProfile.name}` : "Активный профиль не выбран"}
         </span>
-        <p className="muted">Администратор может перепривязать ключи Yandex AI Studio или подключить OpenAI-compatible gateway без пересборки сайта.</p>
+        <p className="muted">Администратор может перепривязать ключи Yandex AI Studio, подключить внешний gateway или локальную модель без пересборки сайта.</p>
       </div>
 
       <form onSubmit={onCreate} className="ai-provider-create">
@@ -2677,6 +2678,7 @@ function AIProviderManager({
         <select name="provider" defaultValue="yandex">
           <option value="yandex">Yandex AI Studio</option>
           <option value="openai_compatible">OpenAI-compatible</option>
+          <option value="local">Локальная модель</option>
           <option value="mock">Mock AI</option>
         </select>
         <label className="inline-check"><input name="is_enabled" type="checkbox" defaultChecked /> Включен</label>
@@ -2687,9 +2689,9 @@ function AIProviderManager({
         <input name="gpt_model_uri" placeholder="Yandex GPT model URI" />
         <input name="embed_doc_uri" placeholder="Yandex doc embedding URI" />
         <input name="embed_query_uri" placeholder="Yandex query embedding URI" />
-        <input name="base_url" placeholder="OpenAI-compatible base URL, например https://host/v1" />
-        <input name="evaluation_model" placeholder="Chat/evaluation model" />
-        <input name="embedding_model" placeholder="Embedding model" />
+        <input name="base_url" placeholder="Base URL: https://host/v1 или http://localhost:11434/v1" />
+        <input name="evaluation_model" placeholder="Chat/evaluation model, например llama3.1" />
+        <input name="embedding_model" placeholder="Embedding model, например nomic-embed-text" />
         <input name="temperature" type="number" min={0} max={2} step={0.1} placeholder="Temperature" />
         <input name="max_tokens" type="number" min={128} step={128} placeholder="Max tokens" />
         <button className="primary" type="submit"><Plus size={17} /> Добавить AI-профиль</button>
@@ -2717,7 +2719,7 @@ function AIProviderManager({
               <input name="gpt_model_uri" defaultValue={configValue(profile, "gpt_model_uri")} placeholder="Yandex GPT model URI" />
               <input name="embed_doc_uri" defaultValue={configValue(profile, "embed_doc_uri")} placeholder="Yandex doc embedding URI" />
               <input name="embed_query_uri" defaultValue={configValue(profile, "embed_query_uri")} placeholder="Yandex query embedding URI" />
-              <input name="base_url" defaultValue={configValue(profile, "base_url")} placeholder="OpenAI-compatible base URL" />
+              <input name="base_url" defaultValue={configValue(profile, "base_url")} placeholder="Base URL или локальный endpoint" />
               <input name="evaluation_model" defaultValue={configValue(profile, "evaluation_model")} placeholder="Chat/evaluation model" />
               <input name="embedding_model" defaultValue={configValue(profile, "embedding_model")} placeholder="Embedding model" />
               <input name="temperature" type="number" min={0} max={2} step={0.1} defaultValue={configValue(profile, "temperature")} placeholder="Temperature" />

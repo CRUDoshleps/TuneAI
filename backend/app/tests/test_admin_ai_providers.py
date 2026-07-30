@@ -109,6 +109,36 @@ def test_admin_can_activate_openai_compatible_provider(client):
     assert "Chat Completions" in readiness.json()["capabilities"]
 
 
+def test_admin_can_activate_local_model_without_api_key(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    created = client.post(
+        "/admin/ai-providers",
+        headers=auth_header(admin_token),
+        json={
+            "name": "Local Ollama",
+            "provider": "local",
+            "is_active": True,
+            "config": {
+                "base_url": "http://localhost:11434/v1/",
+                "evaluation_model": "llama3.1",
+                "embedding_model": "nomic-embed-text",
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    assert payload["provider"] == "local"
+    assert payload["is_active"] is True
+    assert payload["credentials_masked"] == {}
+    assert payload["config"]["base_url"] == "http://localhost:11434/v1"
+
+    readiness = client.get("/readiness/ai")
+    assert readiness.status_code == 200
+    assert readiness.json()["provider"] == "Local model"
+    assert readiness.json()["configured"] is True
+    assert "Local chat model" in readiness.json()["capabilities"]
+
+
 def test_disabled_ai_provider_cannot_be_activated(client):
     admin_token = register_and_login(client, "admin@example.com")
     created = client.post(

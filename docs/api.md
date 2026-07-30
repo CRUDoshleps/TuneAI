@@ -76,7 +76,7 @@ POST /admin/ai-providers/{provider_id}/activate
 DELETE /admin/ai-providers/{provider_id}
 ```
 
-Endpoints доступны только администратору. Секреты принимаются в `credentials`, но в read-ответах возвращаются только как `credentials_masked`.
+Endpoints доступны только администратору. Секреты принимаются в `credentials`, но в read-ответах возвращаются только как `credentials_masked`. Поддерживаются провайдеры `mock`, `yandex`, `openai_compatible` и `local`.
 
 ## Demo Bootstrap
 

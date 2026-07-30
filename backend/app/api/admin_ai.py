@@ -124,13 +124,16 @@ def _validate_ready(profile: AIProviderConfig) -> None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Yandex credentials are required")
         if not credentials.get("folder_id"):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Yandex folder ID is required")
-    if profile.provider == AIProviderEnum.openai_compatible:
+    if profile.provider in {AIProviderEnum.openai_compatible, AIProviderEnum.local}:
         if not credentials.get("api_key"):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="OpenAI-compatible API key is required")
+            if profile.provider == AIProviderEnum.openai_compatible:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="OpenAI-compatible API key is required")
         if not (config.get("base_url") or config.get("chat_completion_url")):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="OpenAI-compatible base URL is required")
+            detail = "Local model endpoint is required" if profile.provider == AIProviderEnum.local else "OpenAI-compatible base URL is required"
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
         if not (config.get("base_url") or config.get("embedding_url")):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="OpenAI-compatible embedding URL is required")
+            detail = "Local model embedding endpoint is required" if profile.provider == AIProviderEnum.local else "OpenAI-compatible embedding URL is required"
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
 
 
 def _clean_credentials(credentials: dict[str, str | None]) -> dict[str, str]:
@@ -162,7 +165,7 @@ def _merge_credentials(current: dict[str, str], updates: dict[str, str | None]) 
 
 def _clean_config(provider: AIProviderEnum, config: dict[str, object]) -> dict[str, object]:
     clean = {str(key).strip(): value for key, value in config.items() if str(key).strip()}
-    if provider == AIProviderEnum.openai_compatible and clean.get("base_url"):
+    if provider in {AIProviderEnum.openai_compatible, AIProviderEnum.local} and clean.get("base_url"):
         clean["base_url"] = str(clean["base_url"]).strip().rstrip("/")
     return clean
 

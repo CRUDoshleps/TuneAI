@@ -113,7 +113,9 @@ class OpenAICompatibleClient:
 
     @property
     def headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.credentials.get('api_key', '')}"}
+        headers = {"Content-Type": "application/json"}
+        if self.credentials.get("api_key"):
+            headers["Authorization"] = f"Bearer {self.credentials['api_key']}"
         if self.config.get("organization"):
             headers["OpenAI-Organization"] = str(self.config["organization"])
         return headers
@@ -164,13 +166,17 @@ def active_provider_readiness(db: Session, settings: Settings | None = None) -> 
         AIProviderEnum.mock: "Mock AI",
         AIProviderEnum.yandex: "Yandex AI Studio",
         AIProviderEnum.openai_compatible: "OpenAI-compatible",
+        AIProviderEnum.local: "Local model",
     }[active.provider]
     capabilities = {
         AIProviderEnum.mock: ["Mock evaluation", "Mock embeddings", "RAG"],
         AIProviderEnum.yandex: ["SpeechKit STT", "YandexGPT", "Text Embeddings", "RAG"],
         AIProviderEnum.openai_compatible: ["Chat Completions", "Embeddings", "RAG"],
+        AIProviderEnum.local: ["Local chat model", "Local embeddings", "RAG"],
     }[active.provider]
-    if active.provider == AIProviderEnum.openai_compatible and (settings.yandex_api_key or settings.yandex_iam_token or settings.yandex_mock):
+    if active.provider in {AIProviderEnum.openai_compatible, AIProviderEnum.local} and (
+        settings.yandex_api_key or settings.yandex_iam_token or settings.yandex_mock
+    ):
         capabilities = ["Yandex SpeechKit STT", *capabilities]
     return AIReadiness(
         status="ready" if configured else "configuration_required",
@@ -192,6 +198,8 @@ def _profile_configured(profile: AIProviderConfig) -> bool:
         return bool((credentials.get("api_key") or credentials.get("iam_token")) and credentials.get("folder_id"))
     has_chat = bool(config.get("base_url") or config.get("chat_completion_url"))
     has_embeddings = bool(config.get("base_url") or config.get("embedding_url"))
+    if profile.provider == AIProviderEnum.local:
+        return bool(has_chat and has_embeddings)
     return bool(credentials.get("api_key") and has_chat and has_embeddings)
 
 

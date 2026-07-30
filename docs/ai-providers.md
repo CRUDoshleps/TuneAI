@@ -6,6 +6,7 @@ TuneAI поддерживает runtime-профили AI-провайдеров
 
 - добавить профиль Yandex AI Studio;
 - добавить OpenAI-compatible gateway;
+- добавить локальную модель через Ollama, LM Studio, vLLM или другой OpenAI-compatible `/v1` endpoint;
 - включить mock-профиль для демонстрации без внешних моделей;
 - заменить ключи без пересборки frontend и backend;
 - активировать один рабочий профиль;
@@ -53,6 +54,27 @@ Yandex-профиль поддерживает SpeechKit STT, YandexGPT, embeddi
 - `max_tokens`.
 
 Такой профиль использует chat completions для оценки текстовых ответов и embeddings для RAG. Для голосовых ответов нужен Yandex SpeechKit из `.env` или отдельный Yandex-профиль.
+
+## Local Models
+
+Локальный профиль нужен, когда модель запущена рядом с TuneAI или в вашей инфраструктуре:
+
+- Ollama: `http://localhost:11434/v1`;
+- LM Studio: `http://localhost:1234/v1`;
+- vLLM или llama.cpp server с OpenAI-compatible API.
+
+Для локального профиля API key необязателен. Обязателен `base_url` или пара `chat_completion_url` + `embedding_url`.
+
+Пример:
+
+```text
+Provider: Local model
+Base URL: http://localhost:11434/v1
+Chat/evaluation model: llama3.1
+Embedding model: nomic-embed-text
+```
+
+Локальный профиль использует локальный chat endpoint для проверки ответов и локальные embeddings для RAG. Если нужно проверять голосовые ответы, оставьте SpeechKit-настройки Yandex в `.env`; текстовые ответы полностью проходят через локальную модель.
 
 ## Fallback
 

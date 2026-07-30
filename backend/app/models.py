@@ -79,6 +79,7 @@ class AIProviderEnum(str, enum.Enum):
     mock = "mock"
     yandex = "yandex"
     openai_compatible = "openai_compatible"
+    local = "local"
 
 
 class OutboxStatusEnum(str, enum.Enum):

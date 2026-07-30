@@ -42,7 +42,7 @@ export type AIReadiness = {
 export type AIProviderConfig = {
   id: string;
   name: string;
-  provider: "mock" | "yandex" | "openai_compatible";
+  provider: "mock" | "yandex" | "openai_compatible" | "local";
   is_enabled: boolean;
   is_active: boolean;
   credentials_masked: Record<string, string>;
@@ -271,6 +271,8 @@ const detailMessages: Record<string, string> = {
   "OpenAI-compatible API key is required": "Для OpenAI-compatible провайдера нужен API-ключ.",
   "OpenAI-compatible base URL is required": "Для OpenAI-compatible провайдера нужен base URL.",
   "OpenAI-compatible embedding URL is required": "Для OpenAI-compatible провайдера нужен base URL или отдельный embedding URL.",
+  "Local model endpoint is required": "Для локальной модели нужен endpoint, например http://localhost:11434/v1.",
+  "Local model embedding endpoint is required": "Для локальной модели нужен endpoint с embeddings или отдельный embedding URL.",
   "Only self-training users and staff users can create tests": "У вашей роли нет прав на создание таких тестов.",
   "Self-training users can create only self-training tests":
     "В личном режиме можно создавать только тренировки для самостоятельной подготовки.",
