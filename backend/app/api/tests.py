@@ -5,10 +5,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.deps import can_create_tests, get_current_user
-from app.models import Assignment, Attempt, Question, RoleEnum, Test, TestTypeEnum, User
-from app.schemas import AssignRequest, QuestionCreate, QuestionRead, TestCreate, TestRead, TestUpdate
+from app.models import Answer, Assignment, Attempt, Question, RoleEnum, Test, TestTypeEnum, User
+from app.schemas import AssignRequest, QuestionCreate, QuestionRead, QuestionReorderRequest, QuestionUpdate, TestCreate, TestRead, TestUpdate
 from app.services.moderation import censor_content, censor_text
-from app.services.test_visibility import can_manage_test, can_view_test
+from app.services.access_control import can_manage_test, can_view_test
 
 
 router = APIRouter(prefix="/tests", tags=["tests"])
@@ -114,6 +114,73 @@ def add_question(
     db.commit()
     db.refresh(question)
     return question
+
+
+@router.patch("/{test_id}/questions/{question_id}", response_model=QuestionRead)
+def update_question(
+    test_id: str,
+    question_id: str,
+    payload: QuestionUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Question:
+    test = _load_test(db, test_id)
+    _ensure_manager(test, user)
+    question = db.get(Question, question_id)
+    if not question or question.test_id != test.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        if field in {"text", "expected_answer"} and value is not None:
+            value = censor_text(value)
+        setattr(question, field, value)
+    db.add(question)
+    db.commit()
+    db.refresh(question)
+    return question
+
+
+@router.delete("/{test_id}/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_question(
+    test_id: str,
+    question_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    test = _load_test(db, test_id)
+    _ensure_manager(test, user)
+    question = db.get(Question, question_id)
+    if not question or question.test_id != test.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    answers_count = db.scalar(select(func.count(Answer.id)).where(Answer.question_id == question.id)) or 0
+    if answers_count:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Question has answers and cannot be deleted")
+    db.delete(question)
+    db.commit()
+
+
+@router.post("/{test_id}/questions/reorder", response_model=TestRead)
+def reorder_questions(
+    test_id: str,
+    payload: QuestionReorderRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    test = _load_test(db, test_id)
+    _ensure_manager(test, user)
+    current_ids = {question.id for question in test.questions}
+    requested_ids = set(payload.question_ids)
+    if current_ids != requested_ids:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Question order must include every question")
+    by_id = {question.id: question for question in test.questions}
+    for index, question in enumerate(test.questions):
+        question.order_index = -(index + 1)
+        db.add(question)
+    db.flush()
+    for index, question_id in enumerate(payload.question_ids):
+        by_id[question_id].order_index = index
+        db.add(by_id[question_id])
+    db.commit()
+    return _serialize_test(_load_test(db, test.id), user)
 
 
 @router.post("/{test_id}/assign", status_code=status.HTTP_204_NO_CONTENT)

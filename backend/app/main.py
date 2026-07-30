@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api import admin, attempts, auth, materials, tests, users
+from app.api import admin, analytics, attempts, auth, materials, public, tests, users
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal, init_db
@@ -117,11 +117,13 @@ if settings.metrics_enabled:
 
 
 app.include_router(auth.router)
+app.include_router(public.router)
 app.include_router(users.router)
 app.include_router(tests.router)
 app.include_router(attempts.router)
 app.include_router(materials.router)
 app.include_router(admin.router)
+app.include_router(analytics.router)
 
 
 def _is_rate_limited(request: Request) -> bool:

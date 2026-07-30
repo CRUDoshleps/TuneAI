@@ -41,6 +41,17 @@
 - очередь фоновой обработки через RabbitMQ и Transactional Outbox;
 - безопасный mock-режим без расходов на API.
 
+## Документация
+
+- [Демо-сценарии](docs/demo.md)
+- [Self-host развертывание](docs/self-host.md)
+- [API для интеграций](docs/api.md)
+- [Роли и права](docs/roles.md)
+- [RAG-материалы](docs/rag.md)
+- [AI Safety](docs/ai-safety.md)
+- [LMS-интеграции](docs/lms-integrations.md)
+- [Roadmap](docs/roadmap.md)
+
 ## Как это работает
 
 1. Студент записывает ответ с микрофона.
@@ -76,12 +87,13 @@ docker compose --profile demo run --rm seed
 
 Откройте локально: [http://localhost:3000](http://localhost:3000)
 
-Демо-аккаунты:
+Демо-аккаунты для локальной seed-базы:
 
 ```text
 student@tuneai.dev / password123
 examinee@tuneai.dev / password123
 candidate@tuneai.dev / password123
+methodist@tuneai.dev / password123
 teacher@tuneai.dev / password123
 interviewer@tuneai.dev / password123
 admin@tuneai.dev / password123
@@ -91,7 +103,7 @@ admin@tuneai.dev / password123
 
 TuneAI можно развернуть под собственный бренд, учебный процесс и набор ролей без изменения исходного кода. Основные настройки находятся в `.env` и передаются frontend на этапе сборки Docker-образа.
 
-После клонирования `.env.example` включает `NEXT_PUBLIC_TUNEAI_TEMPLATE=unconfigured`. Поэтому локально поднимается нейтральный ненастроенный демо-шаблон, а не официальный сайт проекта. Он специально показывает placeholder-бренд, placeholder-почту и подсказки, что владельцу инстанса нужно настроить систему под себя.
+После клонирования `.env.example` включает `NEXT_PUBLIC_TUNEAI_TEMPLATE=unconfigured`. Поэтому локально поднимается нейтральный демо-шаблон, а не официальный сайт проекта. Он показывает пример бренда, почты и подсказки, что владельцу инстанса нужно настроить систему под себя.
 
 ```env
 NEXT_PUBLIC_TUNEAI_TEMPLATE=unconfigured

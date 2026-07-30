@@ -1,7 +1,7 @@
 import math
 import re
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Material, MaterialChunk
@@ -31,6 +31,7 @@ async def create_material_chunks(db: Session, material: Material, ai: YandexAICl
         row = MaterialChunk(
             material_id=material.id,
             test_id=material.test_id,
+            question_id=material.question_id,
             chunk_index=index,
             text=chunk,
             embedding=embedding,
@@ -44,11 +45,17 @@ async def retrieve_context(
     db: Session,
     *,
     test_id: str,
+    question_id: str | None = None,
     query: str,
     limit: int = 5,
     ai: YandexAIClient | None = None,
 ) -> list[str]:
-    rows = list(db.scalars(select(MaterialChunk).where(MaterialChunk.test_id == test_id)).all())
+    stmt = select(MaterialChunk).where(MaterialChunk.test_id == test_id)
+    if question_id:
+        stmt = stmt.where(or_(MaterialChunk.question_id.is_(None), MaterialChunk.question_id == question_id))
+    else:
+        stmt = stmt.where(MaterialChunk.question_id.is_(None))
+    rows = list(db.scalars(stmt).all())
     if not rows:
         return []
     ai = ai or YandexAIClient()
@@ -68,4 +75,3 @@ def _cosine(left: list[float], right: list[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return dot / (left_norm * right_norm)
-

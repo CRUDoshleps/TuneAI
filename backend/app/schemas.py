@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from app.models import AnswerStatusEnum, AttemptStatusEnum, RoleEnum, TestStatusEnum, TestTypeEnum
+from app.models import AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, RoleEnum, TestStatusEnum, TestTypeEnum
 
 
 class TokenPair(BaseModel):
@@ -55,6 +55,17 @@ class QuestionCreate(BaseModel):
     expected_answer: str = ""
     order_index: int = 0
     max_score: float = Field(default=10, gt=0)
+
+
+class QuestionUpdate(BaseModel):
+    text: str | None = Field(default=None, min_length=5)
+    expected_answer: str | None = None
+    order_index: int | None = None
+    max_score: float | None = Field(default=None, gt=0)
+
+
+class QuestionReorderRequest(BaseModel):
+    question_ids: list[str] = Field(min_length=1)
 
 
 class QuestionRead(BaseModel):
@@ -120,7 +131,9 @@ class AttemptStartRequest(BaseModel):
 class AnswerRead(BaseModel):
     id: str
     question_id: str
+    answer_type: AnswerTypeEnum = AnswerTypeEnum.audio
     status: AnswerStatusEnum
+    text_response: str | None = None
     transcript: str | None = None
     evaluation: dict[str, Any] | None = None
     score: float | None = None
@@ -149,6 +162,39 @@ class AttemptRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TextAnswerRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+
+
+class AnswerResultRead(BaseModel):
+    answer_id: str
+    question_id: str
+    status: AnswerStatusEnum
+    answer_type: AnswerTypeEnum
+    transcript: str | None = None
+    score: float | None = None
+    max_score: float | None = None
+    feedback: str | None = None
+    mistakes: list[str] = []
+    missing_points: list[str] = []
+    recommendations: str | None = None
+    source_excerpts: list[str] = []
+    confidence: float | None = None
+    review_status: Literal["not_ready", "ai_final", "review_recommended", "reviewed"] = "not_ready"
+
+
+class AttemptResultRead(BaseModel):
+    id: str
+    attempt_id: str
+    test_id: str
+    user_id: str
+    status: AttemptStatusEnum
+    total_score: float | None = None
+    max_score: float | None = None
+    questions: list[AttemptQuestionRead] = []
+    answers: list[AnswerResultRead]
+
+
 class EvaluationResult(BaseModel):
     score: float = Field(ge=0)
     max_score: float = Field(gt=0)
@@ -159,6 +205,7 @@ class EvaluationResult(BaseModel):
     recommendations: str
     confidence: float = Field(ge=0, le=1)
     source_excerpts: list[str] = Field(default_factory=list)
+    competency_scores: dict[str, float] = Field(default_factory=dict)
     grounded: bool = False
     review_recommended: bool = False
     evaluation_version: str = "tuneai-rubric-v1"
@@ -178,6 +225,43 @@ class AIReadiness(BaseModel):
     capabilities: list[str]
     review_confidence_threshold: float
     disclosure: str
+
+
+class SuspiciousAIInputRead(BaseModel):
+    detected: bool
+    patterns: list[str] = []
+
+
+class CompetencyMetricRead(BaseModel):
+    name: str
+    score: float
+    max_score: float
+    completed_answers: int
+    recommendations: list[str] = []
+
+
+class PublicConfigRead(BaseModel):
+    config: dict[str, Any]
+
+
+class DemoBootstrapRequest(BaseModel):
+    scenario_id: str = Field(min_length=2, max_length=80)
+    label: str = Field(min_length=2, max_length=120)
+    test_type: TestTypeEnum
+    role_label: str = Field(min_length=2, max_length=120)
+    title: str = Field(min_length=3, max_length=255)
+    description: str = ""
+    question: str = Field(min_length=5)
+    expected_answer: str = ""
+    agent_profile: str = "rubric-rag-reviewer"
+    competencies: list[str] = []
+
+
+class DemoBootstrapRead(BaseModel):
+    tokens: TokenPair
+    user: UserRead
+    test: TestRead
+    attempt: AttemptRead | None = None
 
 
 class AnswerReviewRequest(BaseModel):

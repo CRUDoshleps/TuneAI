@@ -2,7 +2,7 @@ from app.tests.conftest import auth_header, register_and_login
 from app.core.config import get_settings
 
 
-def test_first_registered_user_is_admin_and_can_create_staff_user(client):
+def test_admin_uses_separate_registration_and_can_create_staff_user(client):
     token = register_and_login(client, "admin@example.com", full_name="Admin User")
 
     me = client.get("/auth/me", headers=auth_header(token))
@@ -21,6 +21,30 @@ def test_first_registered_user_is_admin_and_can_create_staff_user(client):
     )
     assert created.status_code == 201, created.text
     assert created.json()["role"] == "teacher"
+
+
+def test_public_registration_never_creates_admin_and_admin_login_is_separate(client):
+    public = client.post(
+        "/auth/register",
+        json={"email": "first@example.com", "password": "password123", "full_name": "First Public"},
+    )
+    assert public.status_code == 201, public.text
+    assert public.json()["role"] == "student"
+
+    admin = client.post(
+        "/auth/admin/register",
+        json={"email": "admin@example.com", "password": "password123", "full_name": "Admin User"},
+    )
+    assert admin.status_code == 201, admin.text
+    assert admin.json()["role"] == "admin"
+
+    public_admin_login = client.post("/auth/login", json={"email": "admin@example.com", "password": "password123"})
+    assert public_admin_login.status_code == 403
+    assert public_admin_login.json()["detail"] == "Use admin login"
+
+    admin_student_login = client.post("/auth/admin/login", json={"email": "first@example.com", "password": "password123"})
+    assert admin_student_login.status_code == 403
+    assert admin_student_login.json()["detail"] == "Admin account required"
 
 
 def test_student_can_create_only_self_training_tests(client):

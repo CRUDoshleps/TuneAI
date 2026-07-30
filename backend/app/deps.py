@@ -51,7 +51,7 @@ def _configured_roles(role_names: list[str], fallback: set[RoleEnum]) -> set[Rol
 def can_create_tests(user: User) -> bool:
     roles = _configured_roles(
         get_settings().test_creator_roles,
-        {RoleEnum.student, RoleEnum.teacher, RoleEnum.interviewer, RoleEnum.admin},
+        {RoleEnum.student, RoleEnum.methodist, RoleEnum.teacher, RoleEnum.interviewer, RoleEnum.admin},
     )
     return user.role in roles
 

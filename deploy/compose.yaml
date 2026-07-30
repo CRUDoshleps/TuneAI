@@ -14,7 +14,7 @@ x-backend-environment: &backend-environment
   STORAGE_BACKEND: local
   UPLOAD_DIR: /data/uploads
   MAX_UPLOAD_MB: "50"
-  TEST_CREATOR_ROLES: ${TEST_CREATOR_ROLES:-student,teacher,interviewer,admin}
+  TEST_CREATOR_ROLES: ${TEST_CREATOR_ROLES:-student,methodist,teacher,interviewer,admin}
   ANSWER_REVIEWER_ROLES: ${ANSWER_REVIEWER_ROLES:-teacher,interviewer,admin}
 
 x-backend-secrets: &backend-secrets

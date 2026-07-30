@@ -1,6 +1,6 @@
 import { censorContent, censorText } from "./moderation";
 
-export type Role = "student" | "examinee" | "candidate" | "teacher" | "interviewer" | "admin";
+export type Role = "student" | "examinee" | "candidate" | "methodist" | "teacher" | "interviewer" | "admin";
 export type TestStatus = "draft" | "published" | "archived";
 export type TestType = "exam" | "self_training" | "interview";
 export type AnswerStatus =
@@ -78,7 +78,9 @@ export type Test = {
 export type Answer = {
   id: string;
   question_id: string;
+  answer_type: "audio" | "text";
   status: AnswerStatus;
+  text_response: string | null;
   transcript: string | null;
   evaluation: Evaluation | null;
   score: number | null;
@@ -88,6 +90,50 @@ export type Answer = {
   reviewed_by_id: string | null;
   reviewed_at: string | null;
   error_message: string | null;
+};
+
+export type AttemptResult = {
+  attempt_id: string;
+  test_id: string;
+  user_id: string;
+  status: Attempt["status"];
+  total_score: number | null;
+  max_score: number | null;
+  answers: Array<{
+    answer_id: string;
+    question_id: string;
+    status: AnswerStatus;
+    answer_type: "audio" | "text";
+    transcript: string | null;
+    score: number | null;
+    max_score: number | null;
+    feedback: string | null;
+    mistakes: string[];
+    missing_points: string[];
+    recommendations: string | null;
+    source_excerpts: string[];
+    confidence: number | null;
+    review_status: "not_ready" | "ai_final" | "review_recommended" | "reviewed";
+  }>;
+};
+
+export type CompetencyMetric = {
+  name: string;
+  score: number;
+  max_score: number;
+  completed_answers: number;
+  recommendations: string[];
+};
+
+export type PublicConfigResponse = {
+  config: Record<string, unknown>;
+};
+
+export type DemoBootstrapResponse = {
+  tokens: { access_token: string; refresh_token: string };
+  user: User;
+  test: Test;
+  attempt: Attempt | null;
 };
 
 export type ReviewQueueItem = {
@@ -181,6 +227,9 @@ const detailMessages: Record<string, string> = {
   "Email is already registered": "Этот email уже зарегистрирован. Войдите или используйте другой адрес.",
   "Invalid email or password": "Неверный email или пароль.",
   "Invalid refresh token": "Сессия истекла. Войдите снова.",
+  "Use admin login": "Для администратора используйте отдельный вход в админку.",
+  "Admin account required": "Для входа в админку нужен аккаунт администратора.",
+  "Admin registration is closed": "Первый администратор уже создан. Новых администраторов добавляют из админ-панели.",
   "Authentication required": "Войдите в аккаунт, чтобы продолжить.",
   "Invalid token": "Сессия истекла. Войдите снова.",
   "Inactive or missing user": "Аккаунт недоступен. Обратитесь к администратору.",

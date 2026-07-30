@@ -13,6 +13,7 @@ DEMO_PASSWORD = "password123"
 LEGACY_DEMO_EMAILS = {
     "admin@tuneai.local": "admin@tuneai.dev",
     "teacher@tuneai.local": "teacher@tuneai.dev",
+    "methodist@tuneai.local": "methodist@tuneai.dev",
     "student@tuneai.local": "student@tuneai.dev",
     "examinee@tuneai.local": "examinee@tuneai.dev",
     "interviewer@tuneai.local": "interviewer@tuneai.dev",
@@ -27,6 +28,7 @@ async def seed_demo() -> None:
 
         admin = upsert_user(db, "admin@tuneai.dev", "TuneAI Admin", RoleEnum.admin)
         teacher = upsert_user(db, "teacher@tuneai.dev", "Distributed Systems Teacher", RoleEnum.teacher)
+        methodist = upsert_user(db, "methodist@tuneai.dev", "Demo Methodist", RoleEnum.methodist)
         student = upsert_user(db, "student@tuneai.dev", "Demo Student", RoleEnum.student)
         examinee = upsert_user(db, "examinee@tuneai.dev", "Demo Exam Taker", RoleEnum.examinee)
         interviewer = upsert_user(db, "interviewer@tuneai.dev", "Demo Interviewer", RoleEnum.interviewer)
@@ -45,13 +47,13 @@ async def seed_demo() -> None:
                     "argumentation": "Ответ объясняет не только что делать, но и зачем это нужно.",
                 },
                 time_limit_seconds=180,
-                owner_id=teacher.id,
+                owner_id=methodist.id,
             )
             db.add(test)
             db.flush()
         else:
             test.status = TestStatusEnum.published
-            test.owner_id = teacher.id
+            test.owner_id = methodist.id
 
         questions = [
             (
@@ -227,6 +229,7 @@ async def seed_demo() -> None:
         print("Demo data is ready.")
         print(f"Admin:   admin@tuneai.dev / {DEMO_PASSWORD}")
         print(f"Teacher: teacher@tuneai.dev / {DEMO_PASSWORD}")
+        print(f"Methodist: methodist@tuneai.dev / {DEMO_PASSWORD}")
         print(f"Student/self-training: student@tuneai.dev / {DEMO_PASSWORD}")
         print(f"Exam taker: examinee@tuneai.dev / {DEMO_PASSWORD}")
         print(f"Interviewer: interviewer@tuneai.dev / {DEMO_PASSWORD}")

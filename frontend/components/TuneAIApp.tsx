@@ -25,10 +25,12 @@ import {
   Users
 } from "lucide-react";
 import {
-  platformConfig,
+  mergePlatformConfig,
+  platformConfig as defaultPlatformConfig,
   type DemoActionConfig,
   type DemoFlow,
   type DemoScenarioConfig,
+  type PlatformConfig,
   type PlatformRole,
   type PublicView
 } from "../lib/platform-config";
@@ -39,8 +41,11 @@ import {
   Answer,
   apiFetch,
   Attempt,
+  CompetencyMetric,
+  DemoBootstrapResponse,
   getUserErrorMessage,
   Material,
+  PublicConfigResponse,
   ReviewQueueItem,
   Test,
   User
@@ -55,6 +60,7 @@ const ROLE_LABELS: Record<User["role"], string> = {
   student: "Самоподготовка",
   examinee: "Экзаменуемый",
   interviewer: "Интервьюер",
+  methodist: "Методист",
   candidate: "Кандидат"
 };
 
@@ -182,9 +188,11 @@ function formatJobStatus(status: string) {
 }
 
 export default function TuneAIApp() {
+  const [activePlatformConfig, setActivePlatformConfig] = useState<PlatformConfig>(defaultPlatformConfig);
   const [token, setToken] = useState<string>("");
   const [user, setUser] = useState<User | null>(null);
   const [mode, setMode] = useState<"login" | "register">("register");
+  const [authSpace, setAuthSpace] = useState<"public" | "admin">("public");
   const [tests, setTests] = useState<Test[]>([]);
   const [selectedTest, setSelectedTest] = useState<Test | null>(null);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -197,23 +205,35 @@ export default function TuneAIApp() {
   const [adminMaterials, setAdminMaterials] = useState<Material[]>([]);
   const [adminMaterialTestId, setAdminMaterialTestId] = useState<string>("");
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
+  const [competencyMetrics, setCompetencyMetrics] = useState<CompetencyMetric[]>([]);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [status, setStatus] = useState<string>("Готово к работе");
   const [error, setError] = useState<string>("");
   const [publicView, setPublicView] = useState<PublicView>("home");
-  const [demoScenarioId, setDemoScenarioId] = useState<string>(platformConfig.demoScenarios[0]?.id || "self-training");
+  const [demoScenarioId, setDemoScenarioId] = useState<string>(defaultPlatformConfig.demoScenarios[0]?.id || "self-training");
+  const loadMeRef = useRef<(activeToken?: string) => Promise<void>>(async () => undefined);
+  const clearAuthRef = useRef<() => void>(() => undefined);
+  const loadAttemptHistoryRef = useRef<(activeToken?: string, availableTests?: Test[]) => Promise<void>>(async () => undefined);
+  const loadCompetenciesRef = useRef<(activeToken?: string) => Promise<void>>(async () => undefined);
+  const loadMaterialsRef = useRef<(testId: string, activeToken?: string) => Promise<void>>(async () => undefined);
+
+  useEffect(() => {
+    apiFetch<PublicConfigResponse>("/public/config")
+      .then((response) => {
+        setActivePlatformConfig(mergePlatformConfig(defaultPlatformConfig, response.config as Partial<PlatformConfig>));
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const savedToken = localStorage.getItem("tuneai_access") || "";
     const restoreSession = window.setTimeout(() => {
       setToken(savedToken);
       if (savedToken) {
-        loadMe(savedToken).catch(() => clearAuth());
+        loadMeRef.current(savedToken).catch(() => clearAuthRef.current());
       }
     }, 0);
     return () => window.clearTimeout(restoreSession);
-    // Session restoration must run once per mount; loadMe receives the saved token explicitly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -225,23 +245,23 @@ export default function TuneAIApp() {
         const nextAttempt = await apiFetch<Attempt>(`/attempts/${attempt.id}`, {}, token);
         setAttempt(nextAttempt);
         if (nextAttempt.status === "completed" || nextAttempt.status === "failed") {
-          loadAttemptHistory(token).catch(() => undefined);
+          loadAttemptHistoryRef.current(token).catch(() => undefined);
+          loadCompetenciesRef.current(token).catch(() => undefined);
         }
       } catch (err) {
         setError(getUserErrorMessage(err, "Не удалось обновить состояние попытки."));
       }
     }, 2500);
     return () => window.clearInterval(timer);
-    // Polling is restarted by attempt or token changes; the loader receives the active token explicitly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, token]);
 
   const currentRole = user?.role as PlatformRole | undefined;
-  const canCreateTests = Boolean(currentRole && platformConfig.permissions.testCreatorRoles.includes(currentRole));
-  const canReviewAnswers = Boolean(currentRole && platformConfig.permissions.answerReviewerRoles.includes(currentRole));
+  const canCreateTests = Boolean(currentRole && activePlatformConfig.permissions.testCreatorRoles.includes(currentRole));
+  const canReviewAnswers = Boolean(currentRole && activePlatformConfig.permissions.answerReviewerRoles.includes(currentRole));
   const canManageSelectedTest = Boolean(
     user && selectedTest && (user.role === "admin" || selectedTest.owner_id === user.id)
   );
+  const selectedTestId = selectedTest?.id;
   const manageableTests = user ? tests.filter((test) => canManageTest(test)) : [];
   const takableTests = tests.filter((test) => test.status === "published");
   const activeTitle = {
@@ -256,18 +276,16 @@ export default function TuneAIApp() {
     overview: "Следующий шаг зависит от роли и доступных тестов.",
     take: "Выберите доступный тест и проходите вопросы по порядку.",
     builder: "Создавайте сценарии, вопросы и критерии проверки.",
-    materials: "Добавляйте учебные материалы и назначайте участников.",
+    materials: "Добавляйте учебные материалы, связывайте их с вопросами и назначайте участников.",
     review: "Подтвердите или скорректируйте спорные оценки AI.",
     admin: "Контролируйте пользователей, попытки и ошибки обработки."
   }[activeSection];
 
   useEffect(() => {
-    if (selectedTest && canManageSelectedTest && token) {
-      loadMaterials(selectedTest.id).catch(() => setMaterials([]));
+    if (selectedTestId && canManageSelectedTest && token) {
+      loadMaterialsRef.current(selectedTestId).catch(() => setMaterials([]));
     }
-    // Reload only when the selected test identity, access, or token changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTest?.id, canManageSelectedTest, token]);
+  }, [selectedTestId, canManageSelectedTest, token]);
 
   function canManageTest(test: Test) {
     return Boolean(user && (user.role === "admin" || test.owner_id === user.id));
@@ -278,7 +296,8 @@ export default function TuneAIApp() {
     setUser(me);
     const availableTests = await loadTests(activeToken);
     await loadAttemptHistory(activeToken, availableTests);
-    if (platformConfig.permissions.answerReviewerRoles.includes(me.role as PlatformRole)) {
+    await loadCompetencies(activeToken);
+    if (activePlatformConfig.permissions.answerReviewerRoles.includes(me.role as PlatformRole)) {
       await loadReviewQueue(activeToken);
     }
     if (me.role === "admin") {
@@ -323,6 +342,11 @@ export default function TuneAIApp() {
     setReviewQueue(items);
   }
 
+  async function loadCompetencies(activeToken = token) {
+    const items = await apiFetch<CompetencyMetric[]>("/analytics/competencies", {}, activeToken);
+    setCompetencyMetrics(items);
+  }
+
   async function refreshAdminData() {
     setError("");
     try {
@@ -337,6 +361,12 @@ export default function TuneAIApp() {
     const items = await apiFetch<Material[]>(`/materials?test_id=${testId}`, {}, activeToken);
     setMaterials(items);
   }
+
+  loadMeRef.current = loadMe;
+  clearAuthRef.current = clearAuth;
+  loadAttemptHistoryRef.current = loadAttemptHistory;
+  loadCompetenciesRef.current = loadCompetencies;
+  loadMaterialsRef.current = loadMaterials;
 
   function saveAuth(pair: TokenPair) {
     localStorage.setItem("tuneai_access", pair.access_token);
@@ -361,6 +391,7 @@ export default function TuneAIApp() {
     setAdminMaterials([]);
     setAdminMaterialTestId("");
     setReviewQueue([]);
+    setCompetencyMetrics([]);
     setActiveSection("overview");
   }
 
@@ -375,9 +406,12 @@ export default function TuneAIApp() {
     };
     try {
       if (mode === "register") {
-        await apiFetch<User>("/auth/register", { method: "POST", body: JSON.stringify(payload) });
+        await apiFetch<User>(
+          authSpace === "admin" ? "/auth/admin/register" : "/auth/register",
+          { method: "POST", body: JSON.stringify(payload) }
+        );
       }
-      const pair = await apiFetch<TokenPair>("/auth/login", {
+      const pair = await apiFetch<TokenPair>(authSpace === "admin" ? "/auth/admin/login" : "/auth/login", {
         method: "POST",
         body: JSON.stringify({ email: payload.email, password: payload.password })
       });
@@ -428,71 +462,28 @@ export default function TuneAIApp() {
   async function startDemoFlow(flow: DemoFlow, scenarioId = demoScenarioId) {
     setError("");
     const demoScenario =
-      platformConfig.demoScenarios.find((scenario) => scenario.id === scenarioId) || platformConfig.demoScenarios[0];
-    const stamp = Date.now();
-    const demoUser = {
-      email: `demo-${demoScenario.id}-${stamp}@tuneai.local`,
-      password: "password123",
-      full_name: `${demoScenario.roleLabel} демо`
-    };
+      activePlatformConfig.demoScenarios.find((scenario) => scenario.id === scenarioId) || activePlatformConfig.demoScenarios[0];
     try {
-      await apiFetch<User>("/auth/register", { method: "POST", body: JSON.stringify(demoUser) });
-      const pair = await apiFetch<TokenPair>("/auth/login", {
+      const bootstrap = await apiFetch<DemoBootstrapResponse>("/public/demo/bootstrap", {
         method: "POST",
-        body: JSON.stringify({ email: demoUser.email, password: demoUser.password })
+        body: JSON.stringify({
+          scenario_id: demoScenario.id,
+          label: demoScenario.label,
+          test_type: demoScenario.testType,
+          role_label: demoScenario.roleLabel,
+          title: demoScenario.title,
+          description: demoScenario.description,
+          question: demoScenario.question,
+          expected_answer: demoScenario.expectedAnswer,
+          agent_profile: demoScenario.agentProfile || DEFAULT_AGENT,
+          competencies: demoScenario.competencies
+        })
       });
+      const pair = bootstrap.tokens;
       saveAuth(pair);
-      const demoTest = await apiFetch<Test>(
-        "/tests",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            title: `Демо: ${demoScenario.label}`,
-            description: demoScenario.description,
-            test_type: "self_training",
-            criteria: {
-              rubric: DEFAULT_RUBRIC,
-              competencies: demoScenario.competencies,
-              scenario: demoScenario.testType,
-              agent_profile: demoScenario.agentProfile || DEFAULT_AGENT,
-              review_confidence_threshold: 0.78,
-              strictness: "balanced",
-              material_policy: "test_and_question"
-            },
-            questions: [
-              {
-                text: demoScenario.question,
-                expected_answer: demoScenario.expectedAnswer,
-                order_index: 0,
-                max_score: 10
-              }
-            ]
-          })
-        },
-        pair.access_token
-      );
-      const published = await apiFetch<Test>(
-        `/tests/${demoTest.id}`,
-        { method: "PATCH", body: JSON.stringify({ status: "published" }) },
-        pair.access_token
-      );
-      await apiFetch<Material>(
-        "/materials",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            test_id: published.id,
-            question_id: published.questions[0]?.id || null,
-            title: `Материал: ${demoScenario.label}`,
-            content:
-              `${demoScenario.expectedAnswer} RAG извлекает релевантные фрагменты из материалов и связывает обратную связь с контекстом сценария.`
-          })
-        },
-        pair.access_token
-      );
       await loadMe(pair.access_token);
       const refreshedTests = await loadTests(pair.access_token);
-      const refreshedDemo = refreshedTests.find((item) => item.id === published.id) || published;
+      const refreshedDemo = refreshedTests.find((item) => item.id === bootstrap.test.id) || bootstrap.test;
       setSelectedTest(refreshedDemo);
       if (flow === "materials") {
         await loadMaterials(refreshedDemo.id, pair.access_token);
@@ -860,6 +851,29 @@ export default function TuneAIApp() {
     }
   }
 
+  async function uploadTextAnswer(questionId: string, text: string) {
+    if (!attempt) {
+      return;
+    }
+    setError("");
+    try {
+      const nextAttempt = await apiFetch<Attempt>(
+        `/attempts/${attempt.id}/questions/${questionId}/text`,
+        {
+          method: "POST",
+          body: JSON.stringify({ text })
+        },
+        token
+      );
+      setAttempt(nextAttempt);
+      setStatus("Текстовый ответ отправлен на проверку");
+    } catch (err) {
+      const message = getUserErrorMessage(err, "Не удалось отправить текстовый ответ. Попробуйте еще раз.");
+      setError(message);
+      throw new Error(message);
+    }
+  }
+
   async function reviewAnswer(
     item: ReviewQueueItem,
     event: FormEvent<HTMLFormElement>
@@ -893,8 +907,8 @@ export default function TuneAIApp() {
   }
 
   const activeDemoScenario =
-    platformConfig.demoScenarios.find((scenario) => scenario.id === demoScenarioId) || platformConfig.demoScenarios[0];
-  const consultationHref = `mailto:${platformConfig.consultationEmail}?subject=${encodeURIComponent(`Консультация по внедрению ${platformConfig.productName}`)}`;
+    activePlatformConfig.demoScenarios.find((scenario) => scenario.id === demoScenarioId) || activePlatformConfig.demoScenarios[0];
+  const consultationHref = `mailto:${activePlatformConfig.consultationEmail}?subject=${encodeURIComponent(`Консультация по внедрению ${activePlatformConfig.productName}`)}`;
 
   if (!user) {
     return (
@@ -902,12 +916,12 @@ export default function TuneAIApp() {
         <section className="landing-card">
           <header className="landing-nav">
             <div className="logo-word">
-              {platformConfig.logoUrl && (
-                <span className="logo-image" style={{ backgroundImage: `url(${platformConfig.logoUrl})` }} aria-hidden="true" />
+              {activePlatformConfig.logoUrl && (
+                <span className="logo-image" style={{ backgroundImage: `url(${activePlatformConfig.logoUrl})` }} aria-hidden="true" />
               )}
-              {platformConfig.logoText}
+              {activePlatformConfig.logoText}
             </div>
-            <nav aria-label={`Разделы ${platformConfig.productName}`}>
+            <nav aria-label={`Разделы ${activePlatformConfig.productName}`}>
               {[
                 ["home", "Главная"],
                 ["demo", "Демонстрация"]
@@ -931,13 +945,13 @@ export default function TuneAIApp() {
               <section className="landing-hero home-hero">
                 <div className="hero-copy">
                   <div className="eyebrow">Open-source платформа устных проверок</div>
-                  <h1>{platformConfig.headline}</h1>
-                  <p>{platformConfig.problemDescription}</p>
+                  <h1>{activePlatformConfig.headline}</h1>
+                  <p>{activePlatformConfig.problemDescription}</p>
                   <div className="hero-actions">
                     <button className="primary" onClick={() => setPublicView("demo")}>
                       Открыть демонстрацию
                     </button>
-                    <a className="secondary" href={platformConfig.repositoryUrl} target="_blank" rel="noreferrer">
+                    <a className="secondary" href={activePlatformConfig.repositoryUrl} target="_blank" rel="noreferrer">
                       GitHub
                     </a>
                   </div>
@@ -962,13 +976,13 @@ export default function TuneAIApp() {
               <section className="problem-band">
                 <div>
                   <span>Проблема</span>
-                  <strong>{platformConfig.problemTitle}</strong>
+                  <strong>{activePlatformConfig.problemTitle}</strong>
                 </div>
-                <p>{platformConfig.subheadline}</p>
+                <p>{activePlatformConfig.subheadline}</p>
               </section>
 
               <section className="audience-grid" aria-label="Для кого полезен TuneAI">
-                {platformConfig.audienceCards.map((card) => (
+                {activePlatformConfig.audienceCards.map((card) => (
                   <div key={card.title}>
                     <strong>{card.title}</strong>
                     <p>{card.description}</p>
@@ -977,7 +991,7 @@ export default function TuneAIApp() {
               </section>
 
               <section className="value-grid" aria-label="Почему стоит попробовать">
-                {platformConfig.valueProps.map((item) => (
+                {activePlatformConfig.valueProps.map((item) => (
                   <div key={item.title}>
                     <CheckCircle2 size={20} />
                     <strong>{item.title}</strong>
@@ -994,11 +1008,11 @@ export default function TuneAIApp() {
                   <h1>Выберите сценарий и посмотрите платформу изнутри.</h1>
                   <p>Демо-регистрация создаст временный контур, а тестовый аккаунт откроет подготовленные seed-данные.</p>
                 </div>
-                <a className="secondary" href={platformConfig.docsUrl} target="_blank" rel="noreferrer">Документация</a>
+                <a className="secondary" href={activePlatformConfig.docsUrl} target="_blank" rel="noreferrer">Документация</a>
               </div>
 
               <section className="scenario-tabs" aria-label="Сценарии демонстрации">
-                {platformConfig.demoScenarios.map((scenario) => (
+                {activePlatformConfig.demoScenarios.map((scenario) => (
                   <button
                     type="button"
                     className={activeDemoScenario.id === scenario.id ? "active" : ""}
@@ -1036,9 +1050,18 @@ export default function TuneAIApp() {
 
                 <section className="auth-panel demo-auth-panel">
                   <div className="tabs">
+                    <button className={authSpace === "public" ? "active" : ""} onClick={() => setAuthSpace("public")}>Пользователь</button>
+                    <button className={authSpace === "admin" ? "active" : ""} onClick={() => setAuthSpace("admin")}>Админка</button>
+                  </div>
+                  <div className="tabs">
                     <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
                     <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Вход</button>
                   </div>
+                  {authSpace === "admin" ? (
+                    <p className="muted">Отдельный контур для администраторов. Первый администратор регистрируется здесь, следующих добавляют из админ-панели.</p>
+                  ) : (
+                    <p className="muted">Контур для студентов, экзаменуемых и кандидатов. Администраторы входят отдельно.</p>
+                  )}
                   <form onSubmit={handleAuth} className="stack">
                     {mode === "register" && <input name="full_name" placeholder="Имя и фамилия" required minLength={2} />}
                     <input name="email" type="email" placeholder="Email" required />
@@ -1056,8 +1079,8 @@ export default function TuneAIApp() {
             </section>
           )}
 
-          <section className="ai-pipeline" aria-label={`Как работает ${platformConfig.productName}`}>
-            {platformConfig.pipeline.map((item) => (
+          <section className="ai-pipeline" aria-label={`Как работает ${activePlatformConfig.productName}`}>
+            {activePlatformConfig.pipeline.map((item) => (
               <div key={`${item.step}-${item.title}`}>
                 <span>{item.step}</span>
                 <strong>{item.title}</strong>
@@ -1066,44 +1089,49 @@ export default function TuneAIApp() {
             ))}
           </section>
 
-          <section className="demo-console" aria-label={`Быстрые действия ${platformConfig.productName}`}>
-            {platformConfig.demoActions.map((action) => (
-              <DemoActionButton key={action.id} action={action} onStartDemo={startDemoFlow} />
+          <section className="demo-console" aria-label={`Быстрые действия ${activePlatformConfig.productName}`}>
+            {activePlatformConfig.demoActions.map((action) => (
+              <DemoActionButton
+                key={action.id}
+                action={action}
+                config={activePlatformConfig}
+                onStartDemo={startDemoFlow}
+              />
             ))}
           </section>
 
           <section className="consultation-panel" aria-label="Заявка на консультацию">
             <div>
               <strong>Нужна консультация по внедрению?</strong>
-              <p>Если есть сложности, вопросы или пожелания по развертыванию, напишите на почту. Ответственный: {platformConfig.consultationPerson}.</p>
+              <p>Если есть сложности, вопросы или пожелания по развертыванию, напишите на почту. Ответственный: {activePlatformConfig.consultationPerson}.</p>
             </div>
-            <a className="primary" href={consultationHref}>{platformConfig.consultationEmail}</a>
+            <a className="primary" href={consultationHref}>{activePlatformConfig.consultationEmail}</a>
           </section>
 
           <section className="self-host-panel" aria-label="Self-host настройки">
             <div>
-              <strong>{platformConfig.headline}</strong>
-              <p>{platformConfig.subheadline}</p>
+              <strong>{activePlatformConfig.headline}</strong>
+              <p>{activePlatformConfig.subheadline}</p>
             </div>
-            <code>{platformConfig.deploymentCommand}</code>
+            <code>{activePlatformConfig.deploymentCommand}</code>
             <div className="module-list">
-              {platformConfig.enabledModules.map((module) => (
+              {activePlatformConfig.enabledModules.map((module) => (
                 <span key={module}>{module}</span>
               ))}
             </div>
             <div className="self-host-links">
-              <small>Настраивается через: {platformConfig.environmentCommand}</small>
-              <a href={platformConfig.docsUrl} target="_blank" rel="noreferrer">Документация</a>
+              <small>Настраивается через: {activePlatformConfig.environmentCommand}</small>
+              <a href={activePlatformConfig.docsUrl} target="_blank" rel="noreferrer">Документация</a>
             </div>
           </section>
 
           <footer className="site-footer">
             <div>
-              <strong>{platformConfig.productName}</strong>
-              <span>© {new Date().getFullYear()} {platformConfig.legalOwner}. Все права на self-host данные принадлежат владельцу развертывания.</span>
+              <strong>{activePlatformConfig.productName}</strong>
+              <span>© {new Date().getFullYear()} {activePlatformConfig.legalOwner}. Все права на self-host данные принадлежат владельцу развертывания.</span>
             </div>
             <nav aria-label="Ссылки в подвале">
-              {platformConfig.footerLinks.map((link) => (
+              {activePlatformConfig.footerLinks.map((link) => (
                 <a key={`${link.label}-${link.href}`} href={link.href} target="_blank" rel="noreferrer">
                   {link.label}
                 </a>
@@ -1111,7 +1139,7 @@ export default function TuneAIApp() {
             </nav>
           </footer>
 
-          <div className="brand-wordmark" aria-hidden="true">{platformConfig.productName.toLowerCase()}</div>
+          <div className="brand-wordmark" aria-hidden="true">{activePlatformConfig.productName.toLowerCase()}</div>
         </section>
       </main>
     );
@@ -1132,7 +1160,7 @@ export default function TuneAIApp() {
         <div className="sidebar-top">
           <div>
             <div className="mark small"><Activity size={22} /></div>
-            <h1>{platformConfig.productName}</h1>
+            <h1>{activePlatformConfig.productName}</h1>
             <p>{user.full_name}</p>
             <span className="role">{ROLE_LABELS[user.role]}</span>
           </div>
@@ -1197,7 +1225,9 @@ export default function TuneAIApp() {
             takableTests={takableTests}
             attempt={attempt}
             attemptHistory={attemptHistory}
+            competencyMetrics={competencyMetrics}
             status={status}
+            roleMatrix={activePlatformConfig.roleMatrix}
             onOpen={setActiveSection}
           />
         )}
@@ -1225,6 +1255,7 @@ export default function TuneAIApp() {
                     answers={attempt?.test_id === selectedTest.id ? attempt.answers : []}
                     onStart={() => startAttempt(selectedTest)}
                     onUpload={uploadRecording}
+                    onTextSubmit={uploadTextAnswer}
                     onError={setError}
                   />
                 ) : (
@@ -1322,7 +1353,9 @@ function JourneyOverview({
   takableTests,
   attempt,
   attemptHistory,
+  competencyMetrics,
   status,
+  roleMatrix,
   onOpen
 }: {
   user: User;
@@ -1331,7 +1364,9 @@ function JourneyOverview({
   takableTests: Test[];
   attempt: Attempt | null;
   attemptHistory: Attempt[];
+  competencyMetrics: CompetencyMetric[];
   status: string;
+  roleMatrix: PlatformConfig["roleMatrix"];
   onOpen: (section: SectionId) => void;
 }) {
   const route =
@@ -1352,7 +1387,17 @@ function JourneyOverview({
             ["2", "Настроить материалы", "materials"],
             ["3", user.role === "admin" ? "Проверить мониторинг" : "Проверить ответы", user.role === "admin" ? "admin" : "review"]
   ];
-  const competencies = buildCompetencyMap(attempt ? [attempt, ...attemptsWithoutActive(attemptHistory, attempt.id)] : attemptHistory, tests);
+  const competencies = competencyMetrics.length
+    ? competencyMetrics.map((metric) => {
+        const percent = metric.max_score > 0 ? Math.round((metric.score / metric.max_score) * 100) : 0;
+        return {
+          name: metric.name,
+          completed: metric.completed_answers,
+          percent,
+          recommendation: metric.recommendations[0] || "Продолжайте практику по этой компетенции."
+        };
+      })
+    : buildCompetencyMap(attempt ? [attempt, ...attemptsWithoutActive(attemptHistory, attempt.id)] : attemptHistory, tests);
 
   return (
     <section className="overview-layout">
@@ -1399,7 +1444,7 @@ function JourneyOverview({
       <section className="panel">
         <div className="panel-title"><Shield size={18} /> Разделение ролей</div>
         <div className="role-matrix">
-          {platformConfig.roleMatrix.map(({ action, roles }) => (
+          {roleMatrix.map(({ action, roles }) => (
             <div key={action}>
               <strong>{action}</strong>
               <span>{roles}</span>
@@ -1417,9 +1462,11 @@ function attemptsWithoutActive(attempts: Attempt[], activeAttemptId: string) {
 
 function DemoActionButton({
   action,
+  config,
   onStartDemo
 }: {
   action: DemoActionConfig;
+  config: PlatformConfig;
   onStartDemo: (flow: DemoFlow) => void;
 }) {
   const icon =
@@ -1438,7 +1485,7 @@ function DemoActionButton({
     return <button onClick={() => onStartDemo(flow)}>{content}</button>;
   }
   return (
-    <a href={action.href || platformConfig.repositoryUrl} target="_blank" rel="noreferrer">
+    <a href={action.href || config.repositoryUrl} target="_blank" rel="noreferrer">
       {content}
     </a>
   );
@@ -1757,6 +1804,7 @@ function TestRunner({
   answers,
   onStart,
   onUpload,
+  onTextSubmit,
   onError
 }: {
   test: Test;
@@ -1764,6 +1812,7 @@ function TestRunner({
   answers: Answer[];
   onStart: () => void;
   onUpload: (questionId: string, blob: Blob) => Promise<void>;
+  onTextSubmit: (questionId: string, text: string) => Promise<void>;
   onError: (message: string) => void;
 }) {
   const answerByQuestion = useMemo(() => new Map(answers.map((answer) => [answer.question_id, answer])), [answers]);
@@ -1795,7 +1844,12 @@ function TestRunner({
               <strong>{question.text}</strong>
               <small>Максимум: {question.max_score}</small>
             </div>
-            <Recorder disabled={!attempt} onUpload={(blob) => onUpload(question.id, blob)} onError={onError} />
+            <AnswerSubmitter
+              disabled={!attempt || Boolean(answerByQuestion.get(question.id))}
+              onUpload={(blob) => onUpload(question.id, blob)}
+              onTextSubmit={(text) => onTextSubmit(question.id, text)}
+              onError={onError}
+            />
             <AnswerStatusView answer={answerByQuestion.get(question.id)} />
           </div>
         ))}
@@ -1812,6 +1866,59 @@ function TestRunner({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function AnswerSubmitter({
+  disabled,
+  onUpload,
+  onTextSubmit,
+  onError
+}: {
+  disabled: boolean;
+  onUpload: (blob: Blob) => Promise<void>;
+  onTextSubmit: (text: string) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [mode, setMode] = useState<"audio" | "text">("audio");
+  const [busy, setBusy] = useState(false);
+
+  async function submitText(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const text = String(form.get("text") || "").trim();
+    if (!text) {
+      onError("Введите текст ответа.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await onTextSubmit(text);
+      event.currentTarget.reset();
+    } catch (err) {
+      onError(getUserErrorMessage(err, "Не удалось отправить текстовый ответ."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="answer-submit">
+      <div className="segmented">
+        <button className={mode === "audio" ? "active" : ""} onClick={() => setMode("audio")} type="button">Голосом</button>
+        <button className={mode === "text" ? "active" : ""} onClick={() => setMode("text")} type="button">Текстом</button>
+      </div>
+      {mode === "audio" ? (
+        <Recorder disabled={disabled} onUpload={onUpload} onError={onError} />
+      ) : (
+        <form className="text-answer-form" onSubmit={submitText}>
+          <textarea name="text" rows={4} placeholder="Введите ответ текстом" disabled={disabled || busy} required />
+          <button className="secondary" disabled={disabled || busy} type="submit">
+            <Upload size={16} /> {busy ? "Проверяем" : "Отправить текст"}
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -2185,6 +2292,7 @@ function AdminPanel({
         <select name="role" defaultValue="examinee">
           <option value="examinee">Экзаменуемый</option>
           <option value="student">Самоподготовка</option>
+          <option value="methodist">Методист</option>
           <option value="teacher">Преподаватель</option>
           <option value="interviewer">Интервьюер</option>
           <option value="candidate">Кандидат</option>
@@ -2229,6 +2337,7 @@ function AdminPanel({
               >
                 <option value="examinee">Экзаменуемый</option>
                 <option value="student">Самоподготовка</option>
+                <option value="methodist">Методист</option>
                 <option value="teacher">Преподаватель</option>
                 <option value="interviewer">Интервьюер</option>
                 <option value="candidate">Кандидат</option>

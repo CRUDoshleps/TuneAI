@@ -1180,6 +1180,45 @@ textarea {
   margin-top: 6px;
 }
 
+.answer-submit {
+  min-width: 260px;
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.segmented {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(86px, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.segmented button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 10px;
+}
+
+.segmented button.active {
+  background: var(--ink);
+  color: #fff;
+}
+
+.text-answer-form {
+  width: min(360px, 100%);
+  display: grid;
+  gap: 8px;
+}
+
+.text-answer-form textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
 .locked-questions {
   border: 1px dashed #d1b843;
   border-radius: 8px;

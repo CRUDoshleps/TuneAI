@@ -1,5 +1,5 @@
 export type DemoFlow = "builder" | "materials" | "take";
-export type PlatformRole = "student" | "examinee" | "candidate" | "teacher" | "interviewer" | "admin";
+export type PlatformRole = "student" | "examinee" | "candidate" | "methodist" | "teacher" | "interviewer" | "admin";
 export type PublicView = "home" | "demo";
 export type PlatformTemplate = "unconfigured" | "official";
 
@@ -228,15 +228,15 @@ const officialConfig: PlatformConfig = {
     { id: "repo", title: "Развернуть у себя", description: "Открыть репозиторий и команды запуска", href: "https://github.com/CRUDoshleps/TuneAI" }
   ],
   roleMatrix: [
-    { action: "Создает тесты", roles: "admin, teacher, interviewer, student" },
-    { action: "Создает вопросы", roles: "владелец теста, admin" },
-    { action: "Загружает RAG", roles: "владелец теста, admin" },
+    { action: "Создает тесты", roles: "admin, methodist, teacher, interviewer, student" },
+    { action: "Создает вопросы", roles: "methodist, владелец теста, admin" },
+    { action: "Загружает RAG", roles: "methodist, владелец теста, admin" },
     { action: "Назначает тесты", roles: "admin" },
     { action: "Проверяет ответы", roles: "admin, teacher, interviewer" },
     { action: "Администрирует", roles: "admin" }
   ],
   permissions: {
-    testCreatorRoles: ["student", "teacher", "interviewer", "admin"],
+    testCreatorRoles: ["student", "methodist", "teacher", "interviewer", "admin"],
     answerReviewerRoles: ["teacher", "interviewer", "admin"]
   }
 };
@@ -312,7 +312,7 @@ const unconfiguredConfig: PlatformConfig = {
   ]
 };
 
-function mergeConfig(base: PlatformConfig, overrides: Partial<PlatformConfig>): PlatformConfig {
+export function mergePlatformConfig(base: PlatformConfig, overrides: Partial<PlatformConfig>): PlatformConfig {
   return {
     ...base,
     ...overrides,
@@ -356,7 +356,7 @@ const selectedTemplate: PlatformTemplate =
   requestedTemplate === "official" ? "official" : "unconfigured";
 const selectedConfig = selectedTemplate === "official" ? officialConfig : unconfiguredConfig;
 
-export const platformConfig = mergeConfig(selectedConfig, {
+export const platformConfig = mergePlatformConfig(selectedConfig, {
   ...jsonConfig,
   template: selectedTemplate,
   productName: process.env.NEXT_PUBLIC_TUNEAI_PRODUCT_NAME || jsonConfig.productName || selectedConfig.productName,

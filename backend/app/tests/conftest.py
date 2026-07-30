@@ -46,7 +46,10 @@ def auth_header(token: str) -> dict[str, str]:
 
 
 def register_and_login(client: TestClient, email: str, password: str = "password123", full_name: str = "Test User"):
-    client.post("/auth/register", json={"email": email, "password": password, "full_name": full_name})
-    response = client.post("/auth/login", json={"email": email, "password": password})
+    is_admin = email.lower().startswith("admin@")
+    register_path = "/auth/admin/register" if is_admin else "/auth/register"
+    login_path = "/auth/admin/login" if is_admin else "/auth/login"
+    client.post(register_path, json={"email": email, "password": password, "full_name": full_name})
+    response = client.post(login_path, json={"email": email, "password": password})
     assert response.status_code == 200, response.text
     return response.json()["access_token"]

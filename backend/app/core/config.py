@@ -2,7 +2,7 @@ from functools import lru_cache
 import json
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     cors_origin_regex: str | None = None
     cors_allow_credentials: bool = True
     rate_limit_per_minute: int = 60
+    demo_bootstrap_enabled: bool = True
 
     database_url: str = "sqlite:///./tuneai.db"
 
@@ -41,8 +42,32 @@ class Settings(BaseSettings):
         "audio/wav",
         "audio/x-wav",
     ]
-    test_creator_roles: Annotated[list[str], NoDecode] = ["student", "teacher", "interviewer", "admin"]
+    test_creator_roles: Annotated[list[str], NoDecode] = ["student", "methodist", "teacher", "interviewer", "admin"]
     answer_reviewer_roles: Annotated[list[str], NoDecode] = ["teacher", "interviewer", "admin"]
+    tuneai_template: str = Field(default="unconfigured", validation_alias=AliasChoices("TUNEAI_TEMPLATE", "NEXT_PUBLIC_TUNEAI_TEMPLATE"))
+    tuneai_product_name: str = Field(
+        default="Self-host Test Platform",
+        validation_alias=AliasChoices("TUNEAI_PRODUCT_NAME", "NEXT_PUBLIC_TUNEAI_PRODUCT_NAME"),
+    )
+    tuneai_logo_text: str = Field(default="Demo", validation_alias=AliasChoices("TUNEAI_LOGO_TEXT", "NEXT_PUBLIC_TUNEAI_LOGO_TEXT"))
+    tuneai_logo_url: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_LOGO_URL", "NEXT_PUBLIC_TUNEAI_LOGO_URL"))
+    tuneai_repository_url: str = Field(
+        default="https://github.com/CRUDoshleps/TuneAI",
+        validation_alias=AliasChoices("TUNEAI_REPOSITORY_URL", "NEXT_PUBLIC_TUNEAI_REPOSITORY_URL"),
+    )
+    tuneai_docs_url: str = Field(
+        default="https://github.com/CRUDoshleps/TuneAI",
+        validation_alias=AliasChoices("TUNEAI_DOCS_URL", "NEXT_PUBLIC_TUNEAI_DOCS_URL"),
+    )
+    tuneai_consultation_email: str = Field(
+        default="admin@example.com",
+        validation_alias=AliasChoices("TUNEAI_CONSULTATION_EMAIL", "NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL"),
+    )
+    tuneai_consultation_person: str = Field(
+        default="Implementation owner",
+        validation_alias=AliasChoices("TUNEAI_CONSULTATION_PERSON", "NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON"),
+    )
+    tuneai_config_json: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_CONFIG_JSON", "NEXT_PUBLIC_TUNEAI_CONFIG_JSON"))
 
     storage_backend: Literal["local", "s3"] = "local"
     s3_endpoint_url: str | None = None
@@ -104,6 +129,8 @@ class Settings(BaseSettings):
             errors.append("SECRET_KEY must be changed")
         if self.yandex_mock:
             errors.append("YANDEX_MOCK must be false")
+        if self.demo_bootstrap_enabled:
+            errors.append("DEMO_BOOTSTRAP_ENABLED must be false")
         if not (self.yandex_api_key or self.yandex_iam_token):
             errors.append("Yandex credentials are required")
         if not self.yandex_folder_id:

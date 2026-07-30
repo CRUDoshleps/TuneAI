@@ -408,6 +408,42 @@ def test_materials_can_be_bound_to_specific_question_and_attempt_result_api(clie
     assert [question["id"] for question in result.json()["questions"]] == [first_question_id, second_question_id]
 
 
+@pytest.mark.asyncio
+async def test_text_answer_skips_speechkit_and_completes_processing(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    test = create_sample_test(client, admin_token)
+    material = client.post(
+        "/materials",
+        headers=auth_header(admin_token),
+        json={
+            "test_id": test["id"],
+            "title": "Text answer material",
+            "content": "Transactional outbox stores events in the same database transaction as answer data.",
+        },
+    )
+    assert material.status_code == 201, material.text
+    attempt_response = client.post("/attempts", headers=auth_header(admin_token), json={"test_id": test["id"]})
+    assert attempt_response.status_code == 201, attempt_response.text
+    attempt = attempt_response.json()
+
+    submitted = client.post(
+        f"/attempts/{attempt['id']}/questions/{test['questions'][0]['id']}/text",
+        headers={**auth_header(admin_token), "Idempotency-Key": "text-answer-1"},
+        json={"text": "Transactional outbox saves the answer and event atomically."},
+    )
+
+    assert submitted.status_code == 201, submitted.text
+    answer = submitted.json()["answers"][0]
+    assert answer["answer_type"] == "text"
+    assert answer["status"] == "completed"
+    assert answer["transcript"] == "Transactional outbox saves the answer and event atomically."
+    assert answer["evaluation"]["grounded"] is True
+
+    result = client.get(f"/attempts/{attempt['id']}/result", headers=auth_header(admin_token))
+    assert result.status_code == 200
+    assert result.json()["answers"][0]["review_status"] == "review_recommended"
+
+
 def test_examinee_sees_only_assigned_exam_and_no_public_self_training(client):
     admin_token = register_and_login(client, "admin@example.com")
     self_training = create_two_question_test(client, admin_token)

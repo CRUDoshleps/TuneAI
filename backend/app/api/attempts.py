@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -10,6 +10,7 @@ from app.metrics import ANSWERS_CREATED
 from app.models import (
     Answer,
     AnswerStatusEnum,
+    AnswerTypeEnum,
     Attempt,
     Question,
     RoleEnum,
@@ -22,13 +23,15 @@ from app.schemas import (
     AnswerReviewRequest,
     AttemptQuestionRead,
     AttemptRead,
+    AttemptResultRead,
     AttemptStartRequest,
+    TextAnswerRequest,
     ReviewQueueItem,
 )
-from app.services.processing import _refresh_attempt_totals
+from app.services.processing import _refresh_attempt_totals, process_answer_uploaded
 from app.services.outbox import ANSWER_UPLOADED, add_outbox_event
 from app.services.storage import StorageService
-from app.services.test_visibility import can_manage_test, can_take_test
+from app.services.access_control import can_manage_test, can_take_test
 
 
 router = APIRouter(prefix="/attempts", tags=["attempts"])
@@ -128,15 +131,15 @@ def get_attempt(
     return _serialize_attempt(db, attempt, user)
 
 
-@router.get("/{attempt_id}/result", response_model=AttemptRead)
+@router.get("/{attempt_id}/result", response_model=AttemptResultRead)
 def get_attempt_result(
     attempt_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> AttemptRead:
+) -> AttemptResultRead:
     attempt = _load_attempt(db, attempt_id)
     _ensure_attempt_access(attempt, user)
-    return _serialize_attempt(db, attempt, user)
+    return _serialize_attempt_result(attempt)
 
 
 @router.post("/{attempt_id}/questions/{question_id}/audio", response_model=AttemptRead, status_code=status.HTTP_201_CREATED)
@@ -144,6 +147,7 @@ async def upload_answer_audio(
     attempt_id: str,
     question_id: str,
     file: UploadFile = File(...),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> AttemptRead:
@@ -159,7 +163,7 @@ async def upload_answer_audio(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Attempt already has answers for all questions")
         if question.id != current_question.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Question is not revealed yet")
-    existing = db.scalar(select(Answer).where(Answer.attempt_id == attempt.id, Answer.question_id == question.id))
+    existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
     if existing and existing.status not in {AnswerStatusEnum.failed}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Question already has an answer")
 
@@ -168,8 +172,11 @@ async def upload_answer_audio(
     storage = StorageService()
     object_key = storage.save_audio(answer_id, file, content)
     answer = existing or Answer(id=answer_id, attempt_id=attempt.id, question_id=question.id)
+    answer.answer_type = AnswerTypeEnum.audio
+    answer.idempotency_key = idempotency_key
     answer.audio_object_key = object_key
     answer.audio_content_type = file.content_type
+    answer.text_response = None
     answer.status = AnswerStatusEnum.queued_for_transcription
     answer.error_message = None
     db.add(answer)
@@ -180,6 +187,46 @@ async def upload_answer_audio(
         payload={"answer_id": answer.id, "attempt_id": attempt.id, "question_id": question.id},
     )
     db.commit()
+    ANSWERS_CREATED.inc()
+    return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
+
+
+@router.post("/{attempt_id}/questions/{question_id}/text", response_model=AttemptRead, status_code=status.HTTP_201_CREATED)
+async def submit_text_answer(
+    attempt_id: str,
+    question_id: str,
+    payload: TextAnswerRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AttemptRead:
+    attempt = _load_attempt(db, attempt_id)
+    if attempt.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only attempt owner can upload answers")
+    question = db.get(Question, question_id)
+    if not question or question.test_id != attempt.test_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    if not _can_manage_attempt(attempt, user):
+        current_question = _current_answerable_question(db, attempt)
+        if current_question is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Attempt already has answers for all questions")
+        if question.id != current_question.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Question is not revealed yet")
+    existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
+    if existing and existing.status not in {AnswerStatusEnum.failed}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Question already has an answer")
+
+    answer = existing or Answer(id=new_id(), attempt_id=attempt.id, question_id=question.id)
+    answer.answer_type = AnswerTypeEnum.text
+    answer.idempotency_key = idempotency_key
+    answer.text_response = payload.text.strip()
+    answer.audio_object_key = None
+    answer.audio_content_type = None
+    answer.status = AnswerStatusEnum.queued_for_transcription
+    answer.error_message = None
+    db.add(answer)
+    db.commit()
+    await process_answer_uploaded(db, answer_id=answer.id)
     ANSWERS_CREATED.inc()
     return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
 
@@ -224,8 +271,8 @@ def review_answer(
 def _load_attempt(db: Session, attempt_id: str) -> Attempt:
     attempt = db.scalar(
         select(Attempt)
-        .where(Attempt.id == attempt_id)
-        .options(selectinload(Attempt.answers), selectinload(Attempt.test))
+            .where(Attempt.id == attempt_id)
+            .options(selectinload(Attempt.answers), selectinload(Attempt.test).selectinload(Test.questions))
     )
     if not attempt:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attempt not found")
@@ -236,6 +283,20 @@ def _ensure_can_take(db: Session, test: Test, user: User) -> None:
     if can_take_test(db, test, user):
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Test is not assigned to this user")
+
+
+def _existing_answer(db: Session, attempt_id: str, question_id: str, idempotency_key: str | None) -> Answer | None:
+    if idempotency_key:
+        answer = db.scalar(
+            select(Answer).where(
+                Answer.attempt_id == attempt_id,
+                Answer.question_id == question_id,
+                Answer.idempotency_key == idempotency_key,
+            )
+        )
+        if answer:
+            return answer
+    return db.scalar(select(Answer).where(Answer.attempt_id == attempt_id, Answer.question_id == question_id))
 
 
 def _can_manage_attempt(attempt: Attempt, user: User) -> bool:
@@ -299,4 +360,56 @@ def _serialize_attempt(db: Session, attempt: Attempt, user: User) -> AttemptRead
             )
             for question in _visible_questions(db, attempt, user)
         ],
+    )
+
+
+def _serialize_attempt_result(attempt: Attempt) -> AttemptResultRead:
+    from app.schemas import AnswerResultRead
+
+    rows: list[AnswerResultRead] = []
+    for answer in sorted(attempt.answers, key=lambda item: item.created_at):
+        evaluation = answer.evaluation or {}
+        review_status = "not_ready"
+        if answer.reviewed_at:
+            review_status = "reviewed"
+        elif evaluation.get("review_recommended"):
+            review_status = "review_recommended"
+        elif answer.status == AnswerStatusEnum.completed:
+            review_status = "ai_final"
+        rows.append(
+            AnswerResultRead(
+                answer_id=answer.id,
+                question_id=answer.question_id,
+                status=answer.status,
+                answer_type=answer.answer_type,
+                transcript=answer.transcript,
+                score=answer.review_score if answer.review_score is not None else answer.score,
+                max_score=answer.max_score,
+                feedback=evaluation.get("feedback"),
+                mistakes=list(evaluation.get("mistakes") or []),
+                missing_points=list(evaluation.get("missing_points") or []),
+                recommendations=evaluation.get("recommendations"),
+                source_excerpts=list(evaluation.get("source_excerpts") or []),
+                confidence=evaluation.get("confidence"),
+                review_status=review_status,
+            )
+        )
+    return AttemptResultRead(
+        id=attempt.id,
+        attempt_id=attempt.id,
+        test_id=attempt.test_id,
+        user_id=attempt.user_id,
+        status=attempt.status,
+        total_score=attempt.total_score,
+        max_score=attempt.max_score,
+        questions=[
+            AttemptQuestionRead(
+                id=question.id,
+                text=question.text,
+                order_index=question.order_index,
+                max_score=question.max_score,
+            )
+            for question in sorted(attempt.test.questions, key=lambda item: item.order_index)
+        ],
+        answers=rows,
     )

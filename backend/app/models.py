@@ -28,6 +28,7 @@ class RoleEnum(str, enum.Enum):
     student = "student"
     examinee = "examinee"
     candidate = "candidate"
+    methodist = "methodist"
     teacher = "teacher"
     interviewer = "interviewer"
     admin = "admin"
@@ -61,6 +62,11 @@ class AnswerStatusEnum(str, enum.Enum):
     evaluating = "evaluating"
     completed = "completed"
     failed = "failed"
+
+
+class AnswerTypeEnum(str, enum.Enum):
+    audio = "audio"
+    text = "text"
 
 
 class OutboxStatusEnum(str, enum.Enum):
@@ -151,15 +157,19 @@ class Attempt(Base):
 
 class Answer(Base):
     __tablename__ = "answers"
+    __table_args__ = (UniqueConstraint("attempt_id", "question_id", name="uq_answer_attempt_question"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     attempt_id: Mapped[str] = mapped_column(ForeignKey("attempts.id"), nullable=False)
     question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"), nullable=False)
+    answer_type: Mapped[AnswerTypeEnum] = mapped_column(Enum(AnswerTypeEnum), default=AnswerTypeEnum.audio, nullable=False)
     status: Mapped[AnswerStatusEnum] = mapped_column(
         Enum(AnswerStatusEnum), default=AnswerStatusEnum.uploaded, nullable=False
     )
     audio_object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     audio_content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    text_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     evaluation: Mapped[dict[str, Any] | None] = mapped_column(MutableDict.as_mutable(json_type()), nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -197,6 +207,7 @@ class MaterialChunk(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     material_id: Mapped[str] = mapped_column(ForeignKey("materials.id"), nullable=False)
     test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False, index=True)
+    question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), nullable=True, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)

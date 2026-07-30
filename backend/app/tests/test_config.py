@@ -34,3 +34,13 @@ def test_permission_roles_accept_csv_and_json_values():
 
     assert csv_settings.test_creator_roles == ["teacher", "admin"]
     assert json_settings.answer_reviewer_roles == ["teacher", "interviewer"]
+
+
+def test_public_tuneai_settings_accept_next_public_aliases(monkeypatch):
+    monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_PRODUCT_NAME", "Runtime Product")
+    monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL", "runtime@example.com")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.tuneai_product_name == "Runtime Product"
+    assert settings.tuneai_consultation_email == "runtime@example.com"
