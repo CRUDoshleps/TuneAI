@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.deps import can_create_tests, get_current_user
 from app.models import Assignment, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
 from app.schemas import AssignRequest, QuestionCreate, QuestionRead, TestCreate, TestRead, TestUpdate
+from app.services.moderation import censor_content, censor_text
 
 
 router = APIRouter(prefix="/tests", tags=["tests"])
@@ -38,18 +39,18 @@ def create_test(
             detail="Self-training users can create only self-training tests",
         )
     test = Test(
-        title=payload.title,
-        description=payload.description,
+        title=censor_text(payload.title),
+        description=censor_text(payload.description),
         test_type=payload.test_type,
-        criteria=payload.criteria,
+        criteria=censor_content(payload.criteria),
         time_limit_seconds=payload.time_limit_seconds,
         owner_id=user.id,
     )
     for question in payload.questions:
         test.questions.append(
             Question(
-                text=question.text,
-                expected_answer=question.expected_answer,
+                text=censor_text(question.text),
+                expected_answer=censor_text(question.expected_answer),
                 order_index=question.order_index,
                 max_score=question.max_score,
             )
@@ -82,6 +83,10 @@ def update_test(
     test = _load_test(db, test_id)
     _ensure_manager(test, user)
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field in {"title", "description"} and value is not None:
+            value = censor_text(value)
+        elif field == "criteria" and value is not None:
+            value = censor_content(value)
         setattr(test, field, value)
     db.add(test)
     db.commit()
@@ -99,8 +104,8 @@ def add_question(
     _ensure_manager(test, user)
     question = Question(
         test_id=test.id,
-        text=payload.text,
-        expected_answer=payload.expected_answer,
+        text=censor_text(payload.text),
+        expected_answer=censor_text(payload.expected_answer),
         order_index=payload.order_index,
         max_score=payload.max_score,
     )
