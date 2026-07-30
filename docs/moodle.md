@@ -55,7 +55,8 @@ MOODLE_INTEGRATION_TOKEN=<same-service-token>
 - capabilities `local/tuneai:manage`, `local/tuneai:submit`, `local/tuneai:viewresults`;
 - `client.php` для вызова TuneAI;
 - `question_reader.php` для чтения Moodle `question_attempts`;
-- `submission_service.php` для отправки ответа в TuneAI.
+- `submission_service.php` для отправки текстового или голосового ответа в TuneAI;
+- `upload_audio.php`, `templates/recorder.mustache`, `amd/src/recorder.js` для записи голоса через браузер и безопасной отправки через Moodle backend.
 
 ## Связка Moodle и TuneAI
 
@@ -148,11 +149,26 @@ Moodle-плагин должен запросить доступ к микроф
 1. В Moodle activity появляется кнопка записи ответа.
 2. Browser запрашивает разрешение на микрофон.
 3. Plugin записывает аудио через MediaRecorder.
-4. Plugin отправляет файл на Moodle backend.
+4. Plugin отправляет файл в `local/tuneai/upload_audio.php`.
 5. Moodle backend вызывает `/integrations/moodle/submissions/audio` с service token.
 6. TuneAI сохраняет файл, ставит outbox job и возвращает текущее состояние submission.
 
 Не отправляйте `X-TuneAI-Integration-Key` напрямую из браузера. Браузер должен общаться с Moodle backend, а Moodle backend уже вызывает TuneAI.
+Заготовка endpoint принимает аудио до 25 MB в форматах `webm`, `ogg`, `mpeg`, `mp4`, `wav`.
+
+Recorder UI в заготовке подключается так:
+
+```php
+echo $OUTPUT->render_from_template('local_tuneai/recorder', [
+    'endpoint' => (new moodle_url('/local/tuneai/upload_audio.php'))->out(false),
+    'courseid' => $course->id,
+    'cmid' => $cm->id,
+    'questionid' => $questionid,
+    'groupid' => $groupid,
+    'sesskey' => sesskey(),
+]);
+$PAGE->requires->js_call_amd('local_tuneai/recorder', 'init', ['.local-tuneai-recorder']);
+```
 
 ## Получение результата
 

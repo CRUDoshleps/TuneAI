@@ -33,14 +33,37 @@ MOODLE_INTEGRATION_TOKEN=<same-service-token>
 - `local_tuneai_submission`: локальное зеркало TuneAI submission/result.
 - `client`: вызовы `/integrations/moodle/manifest`, `/submissions/text`, `/submissions/{id}/result`.
 - `question_reader`: чтение текста вопроса и ответа из `question_attempts`.
-- `submission_service`: сбор payload и отправка ответа в TuneAI.
+- `submission_service`: сбор payload и отправка текстового или голосового ответа в TuneAI.
+- `upload_audio.php`: Moodle endpoint, который принимает запись из браузера и отправляет ее в TuneAI.
+- `templates/recorder.mustache` и `amd/src/recorder.js`: базовый MediaRecorder UI.
 - Capabilities для управления mapping, отправки ответов и просмотра результатов.
+
+Audio upload ограничен 25 MB и принимает `webm`, `ogg`, `mpeg`, `mp4`, `wav`.
 
 ## Следующий шаг
 
 Нужно добавить Moodle UI:
 
 - форму настройки mapping в activity;
-- кнопку или observer для отправки ответа после завершения попытки;
+- кнопку или observer для отправки текстового ответа после завершения попытки;
+- подключение recorder template там, где нужен устный ответ;
 - scheduled task для polling результата;
 - запись оценки и feedback в Gradebook.
+
+## Подключение recorder UI
+
+На странице Moodle activity после настройки mapping можно отрендерить шаблон:
+
+```php
+echo $OUTPUT->render_from_template('local_tuneai/recorder', [
+    'endpoint' => (new moodle_url('/local/tuneai/upload_audio.php'))->out(false),
+    'courseid' => $course->id,
+    'cmid' => $cm->id,
+    'questionid' => $questionid,
+    'groupid' => $groupid,
+    'sesskey' => sesskey(),
+]);
+$PAGE->requires->js_call_amd('local_tuneai/recorder', 'init', ['.local-tuneai-recorder']);
+```
+
+Браузер отправляет запись только в Moodle. Service token TuneAI остается на backend Moodle.

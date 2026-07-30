@@ -1,0 +1,12 @@
+<div class="local-tuneai-recorder"
+     data-endpoint="{{endpoint}}"
+     data-courseid="{{courseid}}"
+     data-cmid="{{cmid}}"
+     data-questionid="{{questionid}}"
+     data-groupid="{{groupid}}"
+     data-sesskey="{{sesskey}}">
+  <button type="button" class="btn btn-secondary local-tuneai-start">{{#str}}recordstart, local_tuneai{{/str}}</button>
+  <button type="button" class="btn btn-secondary local-tuneai-stop" disabled>{{#str}}recordstop, local_tuneai{{/str}}</button>
+  <button type="button" class="btn btn-primary local-tuneai-submit" disabled>{{#str}}recordsubmit, local_tuneai{{/str}}</button>
+  <span class="local-tuneai-status" aria-live="polite"></span>
+</div>

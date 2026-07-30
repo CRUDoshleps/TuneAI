@@ -31,6 +31,36 @@ class client {
         return $this->request('POST', '/integrations/moodle/submissions/text', $payload);
     }
 
+    public function submit_audio(array $payload, string $filepath, string $filename, string $contenttype): array {
+        if ((int) get_config('local_tuneai', 'enabled') !== 1) {
+            throw new \moodle_exception('TuneAI is disabled');
+        }
+        if ($this->baseurl === '' || $this->integrationkey === '') {
+            throw new \moodle_exception('TuneAI base URL and integration key are required');
+        }
+        if (!is_readable($filepath)) {
+            throw new \moodle_exception('TuneAI audio file is not readable');
+        }
+        $curl = new \curl();
+        $curl->setHeader('X-TuneAI-Integration-Key: ' . $this->integrationkey);
+        $curl->setopt(['CURLOPT_TIMEOUT' => $this->timeout]);
+        $fields = [];
+        foreach ($payload as $key => $value) {
+            if ($value !== null) {
+                $fields[$key] = (string) $value;
+            }
+        }
+        $fields['file'] = new \CURLFile($filepath, $contenttype, $filename);
+        $response = $curl->post($this->baseurl . '/integrations/moodle/submissions/audio', $fields);
+        $info = $curl->get_info();
+        $status = (int) ($info['http_code'] ?? 0);
+        $decoded = json_decode((string) $response, true);
+        if ($status < 200 || $status >= 300 || !is_array($decoded)) {
+            throw new \moodle_exception('TuneAI audio request failed: HTTP ' . $status . ' ' . (string) $response);
+        }
+        return $decoded;
+    }
+
     public function result(string $externalsubmissionid): array {
         return $this->request('GET', '/integrations/moodle/submissions/' . rawurlencode($externalsubmissionid) . '/result', []);
     }
