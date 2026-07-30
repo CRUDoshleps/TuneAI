@@ -24,7 +24,14 @@ import {
   UserRound,
   Users
 } from "lucide-react";
-import { platformConfig, type DemoActionConfig, type DemoFlow, type PlatformRole } from "../lib/platform-config";
+import {
+  platformConfig,
+  type DemoActionConfig,
+  type DemoFlow,
+  type DemoScenarioConfig,
+  type PlatformRole,
+  type PublicView
+} from "../lib/platform-config";
 import {
   AdminAttempt,
   AdminDashboard,
@@ -193,7 +200,8 @@ export default function TuneAIApp() {
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [status, setStatus] = useState<string>("Готово к работе");
   const [error, setError] = useState<string>("");
-  const [landingScenario, setLandingScenario] = useState<string>(platformConfig.scenarios[0]?.id || "self-host");
+  const [publicView, setPublicView] = useState<PublicView>("home");
+  const [demoScenarioId, setDemoScenarioId] = useState<string>(platformConfig.demoScenarios[0]?.id || "self-training");
 
   useEffect(() => {
     const savedToken = localStorage.getItem("tuneai_access") || "";
@@ -270,7 +278,7 @@ export default function TuneAIApp() {
     setUser(me);
     const availableTests = await loadTests(activeToken);
     await loadAttemptHistory(activeToken, availableTests);
-    if (me.role === "admin" || me.role === "teacher" || me.role === "interviewer") {
+    if (platformConfig.permissions.answerReviewerRoles.includes(me.role as PlatformRole)) {
       await loadReviewQueue(activeToken);
     }
     if (me.role === "admin") {
@@ -382,13 +390,50 @@ export default function TuneAIApp() {
     }
   }
 
-  async function startDemoFlow(flow: DemoFlow) {
+  async function loginDemoAccount(scenario: DemoScenarioConfig) {
     setError("");
+    try {
+      const pair = await apiFetch<TokenPair>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: scenario.accountEmail, password: "password123" })
+      });
+      saveAuth(pair);
+      const me = await apiFetch<User>("/auth/me", {}, pair.access_token);
+      setUser(me);
+      const availableTests = await loadTests(pair.access_token);
+      await loadAttemptHistory(pair.access_token, availableTests);
+      const matchingTest =
+        availableTests.find((item) => item.test_type === scenario.testType) ||
+        availableTests.find((item) => item.title.toLowerCase().includes(scenario.label.toLowerCase())) ||
+        availableTests[0];
+      if (matchingTest) {
+        setSelectedTest(matchingTest);
+        if (scenario.flow === "take") {
+          const nextAttempt = await apiFetch<Attempt>(
+            "/attempts",
+            { method: "POST", body: JSON.stringify({ test_id: matchingTest.id }) },
+            pair.access_token
+          );
+          setAttempt(nextAttempt);
+          setAttemptHistory([nextAttempt]);
+          setActiveSection("take");
+        }
+      }
+      setStatus(`Открыт демо-сценарий: ${scenario.label}`);
+    } catch {
+      await startDemoFlow(scenario.flow, scenario.id);
+    }
+  }
+
+  async function startDemoFlow(flow: DemoFlow, scenarioId = demoScenarioId) {
+    setError("");
+    const demoScenario =
+      platformConfig.demoScenarios.find((scenario) => scenario.id === scenarioId) || platformConfig.demoScenarios[0];
     const stamp = Date.now();
     const demoUser = {
-      email: `demo-${flow}-${stamp}@tuneai.local`,
+      email: `demo-${demoScenario.id}-${stamp}@tuneai.local`,
       password: "password123",
-      full_name: flow === "take" ? "Демо студент" : "Демо автор"
+      full_name: `${demoScenario.roleLabel} демо`
     };
     try {
       await apiFetch<User>("/auth/register", { method: "POST", body: JSON.stringify(demoUser) });
@@ -402,22 +447,22 @@ export default function TuneAIApp() {
         {
           method: "POST",
           body: JSON.stringify({
-            title: "Демо: устный ответ по RAG",
-            description: "Небольшой сценарий для проверки конструктора, материалов и прохождения.",
+            title: `Демо: ${demoScenario.label}`,
+            description: demoScenario.description,
             test_type: "self_training",
             criteria: {
               rubric: DEFAULT_RUBRIC,
-              competencies: ["RAG", "Аргументация", "Устный ответ"],
-              scenario: "self_training",
-              agent_profile: flow === "take" ? "self-training-mentor" : DEFAULT_AGENT,
+              competencies: demoScenario.competencies,
+              scenario: demoScenario.testType,
+              agent_profile: demoScenario.agentProfile || DEFAULT_AGENT,
               review_confidence_threshold: 0.78,
               strictness: "balanced",
               material_policy: "test_and_question"
             },
             questions: [
               {
-                text: "Объясните, зачем RAG помогает проверять устные ответы.",
-                expected_answer: "Ответ должен связать расшифровку, материалы курса, поиск контекста и прозрачную обратную связь.",
+                text: demoScenario.question,
+                expected_answer: demoScenario.expectedAnswer,
                 order_index: 0,
                 max_score: 10
               }
@@ -438,9 +483,9 @@ export default function TuneAIApp() {
           body: JSON.stringify({
             test_id: published.id,
             question_id: published.questions[0]?.id || null,
-            title: "Демо-конспект RAG",
+            title: `Материал: ${demoScenario.label}`,
             content:
-              "RAG извлекает релевантные фрагменты из учебных материалов и помогает AI проверять ответ не только по общим знаниям, но и по конкретному контексту курса."
+              `${demoScenario.expectedAnswer} RAG извлекает релевантные фрагменты из материалов и связывает обратную связь с контекстом сценария.`
           })
         },
         pair.access_token
@@ -847,8 +892,9 @@ export default function TuneAIApp() {
     }
   }
 
-  const activeLandingContent =
-    platformConfig.scenarios.find((scenario) => scenario.id === landingScenario) || platformConfig.scenarios[0];
+  const activeDemoScenario =
+    platformConfig.demoScenarios.find((scenario) => scenario.id === demoScenarioId) || platformConfig.demoScenarios[0];
+  const consultationHref = `mailto:${platformConfig.consultationEmail}?subject=${encodeURIComponent(`Консультация по внедрению ${platformConfig.productName}`)}`;
 
   if (!user) {
     return (
@@ -861,51 +907,154 @@ export default function TuneAIApp() {
               )}
               {platformConfig.logoText}
             </div>
-            <nav aria-label={`Сценарии ${platformConfig.productName}`}>
-              {platformConfig.scenarios.map((scenario) => (
+            <nav aria-label={`Разделы ${platformConfig.productName}`}>
+              {[
+                ["home", "Главная"],
+                ["demo", "Демонстрация"]
+              ].map(([view, label]) => (
                 <button
                   type="button"
-                  className={landingScenario === scenario.id ? "active" : ""}
-                  aria-pressed={landingScenario === scenario.id}
-                  key={scenario.id}
-                  onClick={() => setLandingScenario(scenario.id)}
+                  className={publicView === view ? "active" : ""}
+                  aria-pressed={publicView === view}
+                  key={view}
+                  onClick={() => setPublicView(view as PublicView)}
                 >
-                  {scenario.label}
+                  {label}
                 </button>
               ))}
             </nav>
-            <button className="nav-pill" onClick={() => setMode("login")}>Войти</button>
+            <a className="nav-pill" href={consultationHref}>Консультация</a>
           </header>
 
-          <section className="landing-hero">
-            <div className="hero-copy">
-              <div className="eyebrow">{activeLandingContent.eyebrow}</div>
-              <h1>{activeLandingContent.title}</h1>
-              <p>{activeLandingContent.description}</p>
-              <div className="hero-actions">
-                <button className="primary" onClick={() => startDemoFlow("builder")}>
-                  {activeLandingContent.action}
-                </button>
-                <a className="secondary" href={platformConfig.repositoryUrl} target="_blank" rel="noreferrer">
-                  Развернуть у себя
-                </a>
-              </div>
-            </div>
+          {publicView === "home" ? (
+            <section className="public-home">
+              <section className="landing-hero home-hero">
+                <div className="hero-copy">
+                  <div className="eyebrow">Open-source платформа устных проверок</div>
+                  <h1>{platformConfig.headline}</h1>
+                  <p>{platformConfig.problemDescription}</p>
+                  <div className="hero-actions">
+                    <button className="primary" onClick={() => setPublicView("demo")}>
+                      Открыть демонстрацию
+                    </button>
+                    <a className="secondary" href={platformConfig.repositoryUrl} target="_blank" rel="noreferrer">
+                      GitHub
+                    </a>
+                  </div>
+                </div>
 
-            <section className="auth-panel">
-              <div className="tabs">
-                <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
-                <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Вход</button>
-              </div>
-              <form onSubmit={handleAuth} className="stack">
-                {mode === "register" && <input name="full_name" placeholder="Имя и фамилия" required minLength={2} />}
-                <input name="email" type="email" placeholder="Email" required />
-                <input name="password" type="password" placeholder="Пароль" required minLength={8} />
-                <button className="primary" type="submit"><UserRound size={18} /> Продолжить</button>
-              </form>
-              {error && <p className="error">{error}</p>}
+                <section className="product-preview" aria-label="Превью интерфейса">
+                  <div className="preview-top">
+                    <span>Устный экзамен</span>
+                    <strong>82%</strong>
+                  </div>
+                  <div className="preview-question">Как outbox помогает не терять события?</div>
+                  <div className="preview-wave" aria-hidden="true">
+                    <span /><span /><span /><span /><span /><span />
+                  </div>
+                  <div className="preview-feedback">
+                    <strong>Обратная связь</strong>
+                    <p>Ответ точный, но не хватает примера retry и идемпотентности.</p>
+                  </div>
+                </section>
+              </section>
+
+              <section className="problem-band">
+                <div>
+                  <span>Проблема</span>
+                  <strong>{platformConfig.problemTitle}</strong>
+                </div>
+                <p>{platformConfig.subheadline}</p>
+              </section>
+
+              <section className="audience-grid" aria-label="Для кого полезен TuneAI">
+                {platformConfig.audienceCards.map((card) => (
+                  <div key={card.title}>
+                    <strong>{card.title}</strong>
+                    <p>{card.description}</p>
+                  </div>
+                ))}
+              </section>
+
+              <section className="value-grid" aria-label="Почему стоит попробовать">
+                {platformConfig.valueProps.map((item) => (
+                  <div key={item.title}>
+                    <CheckCircle2 size={20} />
+                    <strong>{item.title}</strong>
+                    <p>{item.description}</p>
+                  </div>
+                ))}
+              </section>
             </section>
-          </section>
+          ) : (
+            <section className="demo-page">
+              <div className="demo-heading">
+                <div>
+                  <div className="eyebrow">Полноценная демо-версия</div>
+                  <h1>Выберите сценарий и посмотрите платформу изнутри.</h1>
+                  <p>Демо-регистрация создаст временный контур, а тестовый аккаунт откроет подготовленные seed-данные.</p>
+                </div>
+                <a className="secondary" href={platformConfig.docsUrl} target="_blank" rel="noreferrer">Документация</a>
+              </div>
+
+              <section className="scenario-tabs" aria-label="Сценарии демонстрации">
+                {platformConfig.demoScenarios.map((scenario) => (
+                  <button
+                    type="button"
+                    className={activeDemoScenario.id === scenario.id ? "active" : ""}
+                    key={scenario.id}
+                    onClick={() => setDemoScenarioId(scenario.id)}
+                  >
+                    <span>{scenario.label}</span>
+                    <small>{scenario.roleLabel}</small>
+                  </button>
+                ))}
+              </section>
+
+              <section className="demo-detail">
+                <div className="demo-story">
+                  <span>{activeDemoScenario.roleLabel}</span>
+                  <h2>{activeDemoScenario.title}</h2>
+                  <p>{activeDemoScenario.description}</p>
+                  <div className="demo-checkpoints">
+                    {activeDemoScenario.checkpoints.map((checkpoint, index) => (
+                      <div key={checkpoint}>
+                        <strong>{index + 1}</strong>
+                        <span>{checkpoint}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hero-actions left">
+                    <button className="primary" onClick={() => startDemoFlow(activeDemoScenario.flow, activeDemoScenario.id)}>
+                      Демо-регистрация
+                    </button>
+                    <button className="secondary" onClick={() => loginDemoAccount(activeDemoScenario)}>
+                      Войти под тестовым аккаунтом
+                    </button>
+                  </div>
+                </div>
+
+                <section className="auth-panel demo-auth-panel">
+                  <div className="tabs">
+                    <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
+                    <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Вход</button>
+                  </div>
+                  <form onSubmit={handleAuth} className="stack">
+                    {mode === "register" && <input name="full_name" placeholder="Имя и фамилия" required minLength={2} />}
+                    <input name="email" type="email" placeholder="Email" required />
+                    <input name="password" type="password" placeholder="Пароль" required minLength={8} />
+                    <button className="primary" type="submit"><UserRound size={18} /> Продолжить</button>
+                  </form>
+                  <div className="test-account">
+                    <small>Тестовый аккаунт</small>
+                    <strong>{activeDemoScenario.accountEmail}</strong>
+                    <span>password123</span>
+                  </div>
+                  {error && <p className="error">{error}</p>}
+                </section>
+              </section>
+            </section>
+          )}
 
           <section className="ai-pipeline" aria-label={`Как работает ${platformConfig.productName}`}>
             {platformConfig.pipeline.map((item) => (
@@ -917,10 +1066,18 @@ export default function TuneAIApp() {
             ))}
           </section>
 
-          <section className="demo-console" aria-label={`Демо ${platformConfig.productName}`}>
+          <section className="demo-console" aria-label={`Быстрые действия ${platformConfig.productName}`}>
             {platformConfig.demoActions.map((action) => (
               <DemoActionButton key={action.id} action={action} onStartDemo={startDemoFlow} />
             ))}
+          </section>
+
+          <section className="consultation-panel" aria-label="Заявка на консультацию">
+            <div>
+              <strong>Нужна консультация по внедрению?</strong>
+              <p>Если есть сложности, вопросы или пожелания по развертыванию, напишите на почту. Ответственный: {platformConfig.consultationPerson}.</p>
+            </div>
+            <a className="primary" href={consultationHref}>{platformConfig.consultationEmail}</a>
           </section>
 
           <section className="self-host-panel" aria-label="Self-host настройки">

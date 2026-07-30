@@ -6,6 +6,7 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
+    "test": "node --test tests/*.test.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

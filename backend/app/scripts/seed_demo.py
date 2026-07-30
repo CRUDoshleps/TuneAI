@@ -15,6 +15,8 @@ LEGACY_DEMO_EMAILS = {
     "teacher@tuneai.local": "teacher@tuneai.dev",
     "student@tuneai.local": "student@tuneai.dev",
     "examinee@tuneai.local": "examinee@tuneai.dev",
+    "interviewer@tuneai.local": "interviewer@tuneai.dev",
+    "candidate@tuneai.local": "candidate@tuneai.dev",
 }
 
 
@@ -27,6 +29,8 @@ async def seed_demo() -> None:
         teacher = upsert_user(db, "teacher@tuneai.dev", "Distributed Systems Teacher", RoleEnum.teacher)
         student = upsert_user(db, "student@tuneai.dev", "Demo Student", RoleEnum.student)
         examinee = upsert_user(db, "examinee@tuneai.dev", "Demo Exam Taker", RoleEnum.examinee)
+        interviewer = upsert_user(db, "interviewer@tuneai.dev", "Demo Interviewer", RoleEnum.interviewer)
+        candidate = upsert_user(db, "candidate@tuneai.dev", "Demo Candidate", RoleEnum.candidate)
 
         test = db.scalar(select(Test).where(Test.title == "Распределенные системы"))
         if not test:
@@ -162,12 +166,71 @@ async def seed_demo() -> None:
         if not exam_assignment:
             db.add(Assignment(test_id=exam.id, user_id=examinee.id, created_by_id=admin.id))
 
+        interview = db.scalar(select(Test).where(Test.title == "Интервью: backend reliability"))
+        if not interview:
+            interview = Test(
+                title="Интервью: backend reliability",
+                description="Демо-сценарий технического интервью с устным разбором архитектурного решения.",
+                test_type=TestTypeEnum.interview,
+                status=TestStatusEnum.published,
+                criteria={
+                    "correctness": "Кандидат объясняет очередь, worker, хранение аудио, retry и идемпотентность.",
+                    "completeness": "Ответ покрывает API, фоновые задачи, обработку ошибок и наблюдаемость.",
+                    "argumentation": "Кандидат связывает техническое решение с пользовательским сценарием и надежностью.",
+                    "agent_profile": "interview-coach",
+                },
+                time_limit_seconds=420,
+                owner_id=interviewer.id,
+            )
+            db.add(interview)
+            db.flush()
+        else:
+            interview.status = TestStatusEnum.published
+            interview.owner_id = interviewer.id
+
+        interview_questions = [
+            (
+                0,
+                "Расскажите, как вы бы спроектировали очередь обработки голосовых ответов.",
+                "Хороший ответ покрывает API, очередь, worker, ретраи, идемпотентность, хранение аудио и наблюдаемость.",
+            ),
+            (
+                1,
+                "Как вы поймете, что AI-проверка начала деградировать в продакшене?",
+                "Нужно упомянуть метрики ошибок, долю ручных проверок, confidence, задержки, алерты и аудит примеров.",
+            ),
+        ]
+        for order_index, text, expected in interview_questions:
+            question = db.scalar(select(Question).where(Question.test_id == interview.id, Question.order_index == order_index))
+            if question:
+                question.text = text
+                question.expected_answer = expected
+                question.max_score = 10
+            else:
+                db.add(
+                    Question(
+                        test_id=interview.id,
+                        order_index=order_index,
+                        text=text,
+                        expected_answer=expected,
+                        max_score=10,
+                    )
+                )
+
+        interview_assignment = db.scalar(
+            select(Assignment).where(Assignment.test_id == interview.id, Assignment.user_id == candidate.id)
+        )
+        if not interview_assignment:
+            db.add(Assignment(test_id=interview.id, user_id=candidate.id, created_by_id=admin.id))
+
         db.commit()
         print("Demo data is ready.")
         print(f"Admin:   admin@tuneai.dev / {DEMO_PASSWORD}")
         print(f"Teacher: teacher@tuneai.dev / {DEMO_PASSWORD}")
         print(f"Student/self-training: student@tuneai.dev / {DEMO_PASSWORD}")
         print(f"Exam taker: examinee@tuneai.dev / {DEMO_PASSWORD}")
+        print(f"Interviewer: interviewer@tuneai.dev / {DEMO_PASSWORD}")
+        print(f"Candidate: candidate@tuneai.dev / {DEMO_PASSWORD}")
 
 
 def normalize_legacy_demo_users(db) -> None:

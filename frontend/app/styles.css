@@ -75,6 +75,14 @@ button:disabled {
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.38);
 }
 
+.public-home,
+.demo-page {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 20px;
+}
+
 .landing-nav {
   position: relative;
   z-index: 2;
@@ -164,6 +172,10 @@ button:disabled {
   font-weight: 800;
 }
 
+a.nav-pill {
+  text-decoration: none;
+}
+
 .nav-pill,
 .tabs button.active,
 .primary {
@@ -204,6 +216,10 @@ a.ghost {
   padding: clamp(34px, 5vw, 66px) 28px 0;
 }
 
+.home-hero {
+  grid-template-columns: minmax(320px, 1fr) minmax(300px, 420px);
+}
+
 .not-found-card {
   min-height: min(620px, calc(100vh - 68px));
 }
@@ -220,6 +236,19 @@ a.ghost {
   text-align: center;
   justify-self: end;
   max-width: 640px;
+}
+
+.home-hero .hero-copy {
+  text-align: left;
+  justify-self: start;
+}
+
+.home-hero .eyebrow {
+  margin-left: 0;
+}
+
+.home-hero .hero-copy p {
+  margin-left: 0;
 }
 
 .eyebrow {
@@ -257,6 +286,251 @@ a.ghost {
   gap: 10px;
   margin-top: 24px;
   flex-wrap: wrap;
+}
+
+.hero-actions.left {
+  justify-content: flex-start;
+}
+
+.home-hero .hero-actions {
+  justify-content: flex-start;
+}
+
+.product-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  background: #fffefa;
+  box-shadow: 0 18px 45px rgba(30, 24, 6, 0.12);
+}
+
+.preview-top,
+.demo-heading,
+.consultation-panel,
+.problem-band {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+}
+
+.preview-top span,
+.problem-band span,
+.demo-story > span,
+.test-account small {
+  color: #5d4b00;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.preview-top strong {
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: #f1fbea;
+  color: var(--green);
+}
+
+.preview-question {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.preview-wave {
+  min-height: 82px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ink);
+}
+
+.preview-wave span {
+  width: 100%;
+  border-radius: 999px;
+  background: var(--yellow);
+}
+
+.preview-wave span:nth-child(1) { height: 22px; }
+.preview-wave span:nth-child(2) { height: 52px; }
+.preview-wave span:nth-child(3) { height: 34px; }
+.preview-wave span:nth-child(4) { height: 66px; }
+.preview-wave span:nth-child(5) { height: 42px; }
+.preview-wave span:nth-child(6) { height: 26px; }
+
+.preview-feedback {
+  display: grid;
+  gap: 6px;
+}
+
+.preview-feedback p,
+.problem-band p,
+.audience-grid p,
+.value-grid p,
+.demo-heading p,
+.demo-story p,
+.consultation-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.problem-band,
+.consultation-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.problem-band strong {
+  display: block;
+  margin-top: 5px;
+  font-size: clamp(24px, 3vw, 36px);
+  line-height: 1.05;
+}
+
+.audience-grid,
+.value-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.audience-grid > div,
+.value-grid > div {
+  min-height: 132px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  background: #fffefa;
+}
+
+.value-grid svg {
+  color: var(--green);
+}
+
+.demo-heading {
+  padding: clamp(30px, 5vw, 52px) 28px 0;
+  align-items: flex-end;
+}
+
+.demo-heading h1 {
+  max-width: 760px;
+  margin: 0;
+  font-size: clamp(40px, 5.4vw, 66px);
+  line-height: 0.96;
+  font-weight: 600;
+}
+
+.scenario-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(170px, 1fr));
+  gap: 10px;
+  padding: 0 28px;
+}
+
+.scenario-tabs button {
+  min-height: 78px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 13px 14px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  background: #fffefa;
+  color: var(--ink);
+}
+
+.scenario-tabs button.active {
+  border-color: #d1b843;
+  background: var(--yellow-soft);
+}
+
+.scenario-tabs span {
+  font-weight: 900;
+}
+
+.scenario-tabs small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.demo-detail {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(280px, 380px);
+  gap: 16px;
+  align-items: start;
+  padding: 0 28px;
+}
+
+.demo-story {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.demo-story h2 {
+  margin: 0;
+  font-size: clamp(28px, 3.8vw, 46px);
+  line-height: 1;
+  font-weight: 650;
+}
+
+.demo-checkpoints {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.demo-checkpoints div {
+  min-height: 82px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px;
+  display: grid;
+  gap: 7px;
+  background: #fffefa;
+}
+
+.demo-checkpoints strong {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--yellow);
+}
+
+.demo-auth-panel {
+  align-self: stretch;
+}
+
+.test-account {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+  background: var(--panel-soft);
+}
+
+.test-account span {
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .brand-wordmark {
@@ -1409,6 +1683,8 @@ td {
 
 @media (max-width: 1050px) {
   .landing-hero,
+  .home-hero,
+  .demo-detail,
   .grid,
   .app-shell,
   .flow-grid,
@@ -1429,11 +1705,37 @@ td {
     padding: 34px 0 0;
   }
 
+  .demo-heading,
+  .demo-detail,
+  .scenario-tabs {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
   .hero-copy {
     justify-self: center;
   }
 
+  .home-hero .hero-copy {
+    text-align: center;
+    justify-self: center;
+  }
+
+  .home-hero .eyebrow,
+  .home-hero .hero-copy p {
+    margin-left: auto;
+  }
+
+  .home-hero .hero-actions,
+  .hero-actions.left {
+    justify-content: center;
+  }
+
   .summary-grid,
+  .audience-grid,
+  .value-grid,
+  .scenario-tabs,
+  .demo-checkpoints,
   .metrics-grid,
   .journey-steps,
   .admin-sections,
@@ -1496,6 +1798,18 @@ td {
 
   .ai-pipeline {
     padding: 0;
+  }
+
+  .demo-heading,
+  .problem-band,
+  .consultation-panel,
+  .preview-top {
+    align-items: flex-start;
+    display: grid;
+  }
+
+  .demo-heading h1 {
+    font-size: 36px;
   }
 
   .hero-copy h1 {

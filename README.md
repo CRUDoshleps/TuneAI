@@ -80,6 +80,10 @@ docker compose --profile demo run --rm seed
 
 ```text
 student@tuneai.dev / password123
+examinee@tuneai.dev / password123
+candidate@tuneai.dev / password123
+teacher@tuneai.dev / password123
+interviewer@tuneai.dev / password123
 admin@tuneai.dev / password123
 ```
 
@@ -93,6 +97,8 @@ NEXT_PUBLIC_TUNEAI_LOGO_TEXT=MOE
 NEXT_PUBLIC_TUNEAI_LOGO_URL=https://example.com/logo.png
 NEXT_PUBLIC_TUNEAI_REPOSITORY_URL=https://github.com/my-org/my-tuneai
 NEXT_PUBLIC_TUNEAI_DOCS_URL=https://docs.example.com/tuneai
+NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL=help@example.com
+NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON=Implementation Team
 TEST_CREATOR_ROLES=teacher,interviewer,admin
 ANSWER_REVIEWER_ROLES=teacher,admin
 ```
@@ -100,7 +106,9 @@ ANSWER_REVIEWER_ROLES=teacher,admin
 Для глубокой настройки главной демо-страницы используйте `NEXT_PUBLIC_TUNEAI_CONFIG_JSON`. Через него можно переопределить:
 
 - бренд и ссылки;
+- почту и ответственного за консультации;
 - сценарии на главной странице;
+- сценарии вкладки "Демонстрация";
 - demo actions;
 - self-host команды;
 - список включенных модулей;
@@ -111,7 +119,7 @@ ANSWER_REVIEWER_ROLES=teacher,admin
 Минимальный пример:
 
 ```env
-NEXT_PUBLIC_TUNEAI_CONFIG_JSON='{"productName":"Campus Oral AI","logoText":"CampusAI","enabledModules":["Экзамены","RAG","Карта компетенций"],"permissions":{"testCreatorRoles":["teacher","interviewer","admin"],"answerReviewerRoles":["teacher","admin"]},"demoActions":[{"id":"builder","title":"Собрать экзамен","description":"Открыть конструктор","flow":"builder"},{"id":"take","title":"Пройти пробу","description":"Запустить демо-попытку","flow":"take"}]}'
+NEXT_PUBLIC_TUNEAI_CONFIG_JSON='{"productName":"Campus Oral AI","logoText":"CampusAI","consultationEmail":"help@example.com","enabledModules":["Экзамены","RAG","Карта компетенций"],"permissions":{"testCreatorRoles":["teacher","interviewer","admin"],"answerReviewerRoles":["teacher","admin"]},"demoActions":[{"id":"builder","title":"Собрать экзамен","description":"Открыть конструктор","flow":"builder"},{"id":"take","title":"Пройти пробу","description":"Запустить демо-попытку","flow":"take"}]}'
 ```
 
 После изменения публичных frontend-переменных пересоберите образ:
