@@ -9,6 +9,9 @@ jobs:
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -17,12 +20,12 @@ jobs:
           cache: "pip"
           cache-dependency-path: backend/requirements-dev.txt
       - name: Install dependencies
-        run: pip install -r backend/requirements-dev.txt
+        run: pip install -r requirements-dev.txt
       - name: Run pytest
-        run: pytest
+        run: pytest -q
 
   frontend:
-    name: Frontend build and audit
+    name: Frontend tests, build and audit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -38,8 +41,24 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
+      - name: Test
+        run: npm test -- --test-reporter=spec
       - name: Build
         run: npm run build
       - name: Audit high severity vulnerabilities
         run: npm audit --audit-level=high
 
+  moodle-e2e:
+    name: Moodle Docker E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+      - name: Free unused Docker space
+        run: docker system prune -af || true
+      - name: Run Moodle integration smoke test
+        run: tests/moodle/run-moodle-e2e.sh
