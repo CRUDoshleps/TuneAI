@@ -10,13 +10,10 @@ from app.metrics import ANSWERS_CREATED
 from app.models import (
     Answer,
     AnswerStatusEnum,
-    Assignment,
     Attempt,
     Question,
     RoleEnum,
     Test,
-    TestStatusEnum,
-    TestTypeEnum,
     User,
     new_id,
 )
@@ -31,6 +28,7 @@ from app.schemas import (
 from app.services.processing import _refresh_attempt_totals
 from app.services.outbox import ANSWER_UPLOADED, add_outbox_event
 from app.services.storage import StorageService
+from app.services.test_visibility import can_manage_test, can_take_test
 
 
 router = APIRouter(prefix="/attempts", tags=["attempts"])
@@ -220,21 +218,13 @@ def _load_attempt(db: Session, attempt_id: str) -> Attempt:
 
 
 def _ensure_can_take(db: Session, test: Test, user: User) -> None:
-    if user.role == RoleEnum.admin or test.owner_id == user.id:
+    if can_take_test(db, test, user):
         return
-    if (
-        user.role == RoleEnum.student
-        and test.status == TestStatusEnum.published
-        and test.test_type == TestTypeEnum.self_training
-    ):
-        return
-    assignment = db.scalar(select(Assignment).where(Assignment.test_id == test.id, Assignment.user_id == user.id))
-    if not assignment:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Test is not assigned to this user")
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Test is not assigned to this user")
 
 
 def _can_manage_attempt(attempt: Attempt, user: User) -> bool:
-    return user.role == RoleEnum.admin or attempt.test.owner_id == user.id
+    return can_manage_test(attempt.test, user)
 
 
 def _ensure_attempt_access(attempt: Attempt, user: User) -> None:

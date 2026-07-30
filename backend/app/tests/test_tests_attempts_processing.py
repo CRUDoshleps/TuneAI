@@ -71,6 +71,17 @@ def create_two_question_test(client, token):
     return published.json()
 
 
+def assign_test_to_current_user(client, manager_token, target_token, test_id):
+    target = client.get("/auth/me", headers=auth_header(target_token))
+    assert target.status_code == 200, target.text
+    assigned = client.post(
+        f"/tests/{test_id}/assign",
+        headers=auth_header(manager_token),
+        json={"user_id": target.json()["id"]},
+    )
+    assert assigned.status_code == 204, assigned.text
+
+
 @pytest.mark.asyncio
 async def test_audio_upload_creates_outbox_event_and_processing_completes(client):
     admin_token = register_and_login(client, "admin@example.com")
@@ -164,6 +175,7 @@ async def test_teacher_reviews_low_confidence_answer_and_overrides_attempt_total
     assert material.status_code == 201, material.text
 
     student_token = register_and_login(client, "student@example.com")
+    assign_test_to_current_user(client, teacher_token, student_token, test["id"])
     attempt_response = client.post(
         "/attempts",
         headers=auth_header(student_token),
@@ -230,6 +242,7 @@ def test_questions_are_hidden_until_attempt_reveals_them(client):
     second_question_id = test["questions"][1]["id"]
 
     student_token = register_and_login(client, "student@example.com")
+    assign_test_to_current_user(client, admin_token, student_token, test["id"])
     visible_tests = client.get("/tests", headers=auth_header(student_token))
     assert visible_tests.status_code == 200
     student_test = visible_tests.json()[0]
@@ -261,6 +274,27 @@ def test_questions_are_hidden_until_attempt_reveals_them(client):
     )
     assert first_upload.status_code == 201, first_upload.text
     assert [question["id"] for question in first_upload.json()["questions"]] == [first_question_id, second_question_id]
+
+
+def test_student_does_not_see_unassigned_published_self_training(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    test = create_two_question_test(client, admin_token)
+    student_token = register_and_login(client, "student@example.com")
+
+    visible_tests = client.get("/tests", headers=auth_header(student_token))
+    assert visible_tests.status_code == 200
+    assert visible_tests.json() == []
+
+    direct_read = client.get(f"/tests/{test['id']}", headers=auth_header(student_token))
+    assert direct_read.status_code == 403
+
+    forbidden_attempt = client.post(
+        "/attempts",
+        headers=auth_header(student_token),
+        json={"test_id": test["id"]},
+    )
+    assert forbidden_attempt.status_code == 403
+    assert forbidden_attempt.json()["detail"] == "Test is not assigned to this user"
 
 
 def test_examinee_sees_only_assigned_exam_and_no_public_self_training(client):
@@ -336,6 +370,7 @@ def test_user_cannot_read_another_users_attempt(client):
     test = create_sample_test(client, admin_token)
     first_student = register_and_login(client, "student-a@example.com")
     second_student = register_and_login(client, "student-b@example.com")
+    assign_test_to_current_user(client, admin_token, first_student, test["id"])
 
     first_attempt = client.post(
         "/attempts",
