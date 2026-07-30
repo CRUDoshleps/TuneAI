@@ -4,10 +4,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Answer, AnswerStatusEnum, AnswerTypeEnum, Attempt, AttemptStatusEnum, Question
+from app.services.ai_provider_runtime import TuneAIClient, get_active_ai_client
 from app.services.ai_safety import build_trusted_evaluation_inputs, detect_suspicious_ai_input
 from app.services.rag import retrieve_context
 from app.services.storage import StorageService
-from app.services.yandex import YandexAIClient
 
 
 async def process_answer_uploaded(
@@ -15,7 +15,7 @@ async def process_answer_uploaded(
     *,
     answer_id: str,
     storage: StorageService | None = None,
-    ai: YandexAIClient | None = None,
+    ai: TuneAIClient | None = None,
 ) -> Answer:
     answer = db.get(Answer, answer_id)
     if answer is None:
@@ -34,7 +34,7 @@ async def process_answer_uploaded(
         return answer
 
     storage = storage or StorageService()
-    ai = ai or YandexAIClient()
+    ai = ai or get_active_ai_client(db)
     attempt = db.get(Attempt, answer.attempt_id)
     question = db.get(Question, answer.question_id)
     if attempt is None or question is None:

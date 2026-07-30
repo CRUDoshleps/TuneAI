@@ -39,6 +39,19 @@ export type AIReadiness = {
   disclosure: string;
 };
 
+export type AIProviderConfig = {
+  id: string;
+  name: string;
+  provider: "mock" | "yandex" | "openai_compatible";
+  is_enabled: boolean;
+  is_active: boolean;
+  credentials_masked: Record<string, string>;
+  config: Record<string, unknown>;
+  created_by_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type User = {
   id: string;
   email: string;
@@ -251,6 +264,13 @@ const detailMessages: Record<string, string> = {
   "User not found": "Пользователь не найден.",
   "Admin cannot deactivate own account": "Нельзя заблокировать свой текущий аккаунт администратора.",
   "Admin cannot remove own admin role": "Нельзя снять роль администратора со своего текущего аккаунта.",
+  "AI provider config not found": "AI-профиль не найден.",
+  "Disabled AI provider cannot be activated": "Нельзя активировать отключенный AI-профиль.",
+  "Yandex credentials are required": "Для Yandex AI Studio нужен API-ключ или IAM-токен.",
+  "Yandex folder ID is required": "Для Yandex AI Studio нужен folder ID.",
+  "OpenAI-compatible API key is required": "Для OpenAI-compatible провайдера нужен API-ключ.",
+  "OpenAI-compatible base URL is required": "Для OpenAI-compatible провайдера нужен base URL.",
+  "OpenAI-compatible embedding URL is required": "Для OpenAI-compatible провайдера нужен base URL или отдельный embedding URL.",
   "Only self-training users and staff users can create tests": "У вашей роли нет прав на создание таких тестов.",
   "Self-training users can create only self-training tests":
     "В личном режиме можно создавать только тренировки для самостоятельной подготовки.",

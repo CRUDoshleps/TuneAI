@@ -1584,6 +1584,76 @@ textarea {
   background: #fffefa;
 }
 
+.ai-provider-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.ai-provider-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+}
+
+.ai-provider-summary p {
+  margin: 0;
+}
+
+.ai-provider-create,
+.ai-provider-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.ai-provider-create {
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  align-items: center;
+}
+
+.ai-provider-create button {
+  justify-self: start;
+}
+
+.ai-provider-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-provider-card-head {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.ai-provider-card-head small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.inline-check {
+  min-height: 42px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 850;
+  color: var(--muted);
+}
+
+.inline-check input {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+}
+
 .questions-manage {
   margin-top: 20px;
 }
@@ -1785,7 +1855,8 @@ td {
   .question-form,
   .assign-form,
   .admin-filters,
-  .admin-user-form {
+  .admin-user-form,
+  .ai-provider-create {
     grid-template-columns: 1fr;
   }
 

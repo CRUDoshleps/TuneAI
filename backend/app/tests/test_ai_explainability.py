@@ -9,8 +9,8 @@ def test_ai_readiness_discloses_mock_mode(client):
     assert payload["status"] == "ready"
     assert payload["mode"] == "mock"
     assert payload["configured"] is True
-    assert payload["provider"] == "Yandex AI Studio"
-    assert {"SpeechKit STT", "YandexGPT", "Text Embeddings", "RAG"} <= set(payload["capabilities"])
+    assert payload["provider"] == "Mock AI"
+    assert {"Mock evaluation", "RAG"} <= set(payload["capabilities"])
     assert "Демонстрационный режим" in payload["disclosure"]
 
 

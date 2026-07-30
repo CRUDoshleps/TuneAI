@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Database,
   FileText,
+  KeyRound,
   LogOut,
   Mic,
   Play,
@@ -38,6 +39,7 @@ import {
   AdminAttempt,
   AdminDashboard,
   AdminFailedJob,
+  AIProviderConfig,
   Answer,
   apiFetch,
   Attempt,
@@ -80,6 +82,12 @@ const MATERIAL_INDEX_LABELS: Record<Material["index_status"], string> = {
   pending: "RAG индексируется",
   indexed: "RAG готов",
   failed: "Ошибка RAG"
+};
+
+const AI_PROVIDER_LABELS: Record<AIProviderConfig["provider"], string> = {
+  mock: "Mock AI",
+  yandex: "Yandex AI Studio",
+  openai_compatible: "OpenAI-compatible"
 };
 
 const ATTEMPT_STATUS_LABELS: Record<Attempt["status"], string> = {
@@ -129,6 +137,50 @@ function buildCriteriaFromForm(form: FormData) {
     strictness: String(form.get("strictness") || "balanced"),
     material_policy: String(form.get("material_policy") || "test_and_question")
   };
+}
+
+function buildAIProviderPayload(form: FormData) {
+  const provider = String(form.get("provider") || "mock") as AIProviderConfig["provider"];
+  const credentials: Record<string, string> = {};
+  const config: Record<string, string | number | boolean> = {};
+  addFormText(credentials, "folder_id", form);
+  addFormText(credentials, "api_key", form);
+  addFormText(credentials, "iam_token", form);
+  addFormText(config, "base_url", form);
+  addFormText(config, "chat_completion_url", form);
+  addFormText(config, "completion_url", form);
+  addFormText(config, "embedding_url", form);
+  addFormText(config, "gpt_model_uri", form);
+  addFormText(config, "embed_doc_uri", form);
+  addFormText(config, "embed_query_uri", form);
+  addFormText(config, "evaluation_model", form);
+  addFormText(config, "embedding_model", form);
+  const temperature = String(form.get("temperature") || "").trim();
+  const maxTokens = String(form.get("max_tokens") || "").trim();
+  if (temperature) {
+    config.temperature = Number(temperature);
+  }
+  if (maxTokens) {
+    config.max_tokens = Number(maxTokens);
+  }
+  if (provider === "mock") {
+    config.mock_embeddings = true;
+  }
+  return {
+    name: String(form.get("name") || AI_PROVIDER_LABELS[provider]).trim(),
+    provider,
+    is_enabled: form.get("is_enabled") === "on",
+    is_active: form.get("is_active") === "on",
+    credentials,
+    config
+  };
+}
+
+function addFormText(target: Record<string, unknown>, key: string, form: FormData) {
+  const value = String(form.get(key) || "").trim();
+  if (value) {
+    target[key] = value;
+  }
 }
 
 function parseCompetencies(value: string) {
@@ -218,6 +270,7 @@ export default function TuneAIApp() {
   const [adminUsers, setAdminUsers] = useState<User[]>([]);
   const [adminAttempts, setAdminAttempts] = useState<AdminAttempt[]>([]);
   const [failedJobs, setFailedJobs] = useState<AdminFailedJob[]>([]);
+  const [aiProviders, setAiProviders] = useState<AIProviderConfig[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [adminMaterials, setAdminMaterials] = useState<Material[]>([]);
   const [adminMaterialTestId, setAdminMaterialTestId] = useState<string>("");
@@ -352,10 +405,12 @@ export default function TuneAIApp() {
     const users = await apiFetch<User[]>("/users", {}, activeToken);
     const attempts = await apiFetch<AdminAttempt[]>("/admin/attempts", {}, activeToken);
     const failed = await apiFetch<AdminFailedJob[]>("/admin/failed-jobs", {}, activeToken);
+    const providers = await apiFetch<AIProviderConfig[]>("/admin/ai-providers", {}, activeToken);
     setAdminDashboard(dashboard);
     setAdminUsers(users);
     setAdminAttempts(attempts);
     setFailedJobs(failed);
+    setAiProviders(providers);
   }
 
   async function loadReviewQueue(activeToken = token) {
@@ -408,6 +463,7 @@ export default function TuneAIApp() {
     setAdminUsers([]);
     setAdminAttempts([]);
     setFailedJobs([]);
+    setAiProviders([]);
     setMaterials([]);
     setAdminMaterials([]);
     setAdminMaterialTestId("");
@@ -782,6 +838,70 @@ export default function TuneAIApp() {
       setStatus("Материал удален");
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось удалить материал."));
+    }
+  }
+
+  async function createAIProvider(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const formElement = event.currentTarget;
+    const payload = buildAIProviderPayload(new FormData(formElement));
+    try {
+      await apiFetch<AIProviderConfig>(
+        "/admin/ai-providers",
+        { method: "POST", body: JSON.stringify(payload) },
+        token
+      );
+      await loadAdmin();
+      setStatus("AI-профиль создан");
+      formElement.reset();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось сохранить AI-профиль."));
+    }
+  }
+
+  async function updateAIProvider(profile: AIProviderConfig, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const payload = buildAIProviderPayload(new FormData(event.currentTarget));
+    const updates = {
+      name: payload.name,
+      is_enabled: payload.is_enabled,
+      credentials: payload.credentials,
+      config: payload.config
+    };
+    try {
+      await apiFetch<AIProviderConfig>(
+        `/admin/ai-providers/${profile.id}`,
+        { method: "PATCH", body: JSON.stringify(updates) },
+        token
+      );
+      await loadAdmin();
+      setStatus("AI-профиль обновлен");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось обновить AI-профиль."));
+    }
+  }
+
+  async function activateAIProvider(profile: AIProviderConfig) {
+    setError("");
+    try {
+      await apiFetch<AIProviderConfig>(`/admin/ai-providers/${profile.id}/activate`, { method: "POST" }, token);
+      await loadAdmin();
+      setStatus("Активный AI-профиль переключен");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось активировать AI-профиль."));
+    }
+  }
+
+  async function deleteAIProvider(profile: AIProviderConfig) {
+    setError("");
+    try {
+      await apiFetch(`/admin/ai-providers/${profile.id}`, { method: "DELETE" }, token);
+      await loadAdmin();
+      setStatus("AI-профиль удален");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось удалить AI-профиль."));
     }
   }
 
@@ -1358,6 +1478,7 @@ export default function TuneAIApp() {
             tests={tests}
             attempts={adminAttempts}
             failedJobs={failedJobs}
+            aiProviders={aiProviders}
             materials={adminMaterials}
             materialTestId={adminMaterialTestId}
             onRefresh={refreshAdminData}
@@ -1367,6 +1488,10 @@ export default function TuneAIApp() {
             onDeleteTest={deleteAdminTest}
             onSelectMaterialTest={selectAdminMaterialTest}
             onDeleteMaterial={deleteAdminMaterial}
+            onCreateAIProvider={createAIProvider}
+            onUpdateAIProvider={updateAIProvider}
+            onActivateAIProvider={activateAIProvider}
+            onDeleteAIProvider={deleteAIProvider}
           />
         )}
       </section>
@@ -2252,6 +2377,7 @@ function AdminPanel({
   tests,
   attempts,
   failedJobs,
+  aiProviders,
   materials,
   materialTestId,
   onRefresh,
@@ -2260,13 +2386,18 @@ function AdminPanel({
   onUpdateTestStatus,
   onDeleteTest,
   onSelectMaterialTest,
-  onDeleteMaterial
+  onDeleteMaterial,
+  onCreateAIProvider,
+  onUpdateAIProvider,
+  onActivateAIProvider,
+  onDeleteAIProvider
 }: {
   dashboard: AdminDashboard | null;
   users: User[];
   tests: Test[];
   attempts: AdminAttempt[];
   failedJobs: AdminFailedJob[];
+  aiProviders: AIProviderConfig[];
   materials: Material[];
   materialTestId: string;
   onRefresh: () => void;
@@ -2276,6 +2407,10 @@ function AdminPanel({
   onDeleteTest: (test: Test) => Promise<void>;
   onSelectMaterialTest: (testId: string) => Promise<void>;
   onDeleteMaterial: (material: Material) => Promise<void>;
+  onCreateAIProvider: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateAIProvider: (profile: AIProviderConfig, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onActivateAIProvider: (profile: AIProviderConfig) => Promise<void>;
+  onDeleteAIProvider: (profile: AIProviderConfig) => Promise<void>;
 }) {
   const [userQuery, setUserQuery] = useState("");
   const [userStatus, setUserStatus] = useState<"all" | "active" | "blocked">("all");
@@ -2341,6 +2476,14 @@ function AdminPanel({
       </div>
 
       <div className="admin-sections">
+        <AIProviderManager
+          profiles={aiProviders}
+          onCreate={onCreateAIProvider}
+          onUpdate={onUpdateAIProvider}
+          onActivate={onActivateAIProvider}
+          onDelete={onDeleteAIProvider}
+        />
+
         <section className="admin-table-wrap admin-wide">
           <h3><Users size={17} /> Пользователи</h3>
           <div className="admin-filters">
@@ -2503,6 +2646,116 @@ function AdminPanel({
       </div>
     </section>
   );
+}
+
+function AIProviderManager({
+  profiles,
+  onCreate,
+  onUpdate,
+  onActivate,
+  onDelete
+}: {
+  profiles: AIProviderConfig[];
+  onCreate: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdate: (profile: AIProviderConfig, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onActivate: (profile: AIProviderConfig) => Promise<void>;
+  onDelete: (profile: AIProviderConfig) => Promise<void>;
+}) {
+  const activeProfile = profiles.find((item) => item.is_active);
+  return (
+    <section className="admin-table-wrap admin-wide ai-provider-panel">
+      <h3><KeyRound size={17} /> AI-провайдеры и ключи</h3>
+      <div className="ai-provider-summary">
+        <span className={`status-pill ${activeProfile ? "completed" : "evaluating"}`}>
+          {activeProfile ? `Активен: ${activeProfile.name}` : "Активный профиль не выбран"}
+        </span>
+        <p className="muted">Администратор может перепривязать ключи Yandex AI Studio или подключить OpenAI-compatible gateway без пересборки сайта.</p>
+      </div>
+
+      <form onSubmit={onCreate} className="ai-provider-create">
+        <input name="name" placeholder="Название профиля" required minLength={2} />
+        <select name="provider" defaultValue="yandex">
+          <option value="yandex">Yandex AI Studio</option>
+          <option value="openai_compatible">OpenAI-compatible</option>
+          <option value="mock">Mock AI</option>
+        </select>
+        <label className="inline-check"><input name="is_enabled" type="checkbox" defaultChecked /> Включен</label>
+        <label className="inline-check"><input name="is_active" type="checkbox" /> Сделать активным</label>
+        <input name="folder_id" placeholder="Yandex folder ID" />
+        <input name="api_key" type="password" placeholder="API key" />
+        <input name="iam_token" type="password" placeholder="Yandex IAM token" />
+        <input name="gpt_model_uri" placeholder="Yandex GPT model URI" />
+        <input name="embed_doc_uri" placeholder="Yandex doc embedding URI" />
+        <input name="embed_query_uri" placeholder="Yandex query embedding URI" />
+        <input name="base_url" placeholder="OpenAI-compatible base URL, например https://host/v1" />
+        <input name="evaluation_model" placeholder="Chat/evaluation model" />
+        <input name="embedding_model" placeholder="Embedding model" />
+        <input name="temperature" type="number" min={0} max={2} step={0.1} placeholder="Temperature" />
+        <input name="max_tokens" type="number" min={128} step={128} placeholder="Max tokens" />
+        <button className="primary" type="submit"><Plus size={17} /> Добавить AI-профиль</button>
+      </form>
+
+      <div className="ai-provider-list">
+        {profiles.map((profile) => (
+          <form key={profile.id} onSubmit={(event) => onUpdate(profile, event)} className="ai-provider-card">
+            <input type="hidden" name="provider" value={profile.provider} />
+            <div className="ai-provider-card-head">
+              <div>
+                <strong>{profile.name}</strong>
+                <small>{AI_PROVIDER_LABELS[profile.provider]} · обновлен {new Date(profile.updated_at).toLocaleString("ru-RU")}</small>
+              </div>
+              <span className={`status-pill ${profile.is_active ? "completed" : profile.is_enabled ? "evaluating" : "failed"}`}>
+                {profile.is_active ? "Активен" : profile.is_enabled ? "Резерв" : "Отключен"}
+              </span>
+            </div>
+            <div className="settings-form mini">
+              <input name="name" defaultValue={profile.name} placeholder="Название профиля" required minLength={2} />
+              <label className="inline-check"><input name="is_enabled" type="checkbox" defaultChecked={profile.is_enabled} /> Включен</label>
+              <input name="folder_id" placeholder={maskedPlaceholder(profile, "folder_id", "Yandex folder ID")} />
+              <input name="api_key" type="password" placeholder={maskedPlaceholder(profile, "api_key", "API key")} />
+              <input name="iam_token" type="password" placeholder={maskedPlaceholder(profile, "iam_token", "Yandex IAM token")} />
+              <input name="gpt_model_uri" defaultValue={configValue(profile, "gpt_model_uri")} placeholder="Yandex GPT model URI" />
+              <input name="embed_doc_uri" defaultValue={configValue(profile, "embed_doc_uri")} placeholder="Yandex doc embedding URI" />
+              <input name="embed_query_uri" defaultValue={configValue(profile, "embed_query_uri")} placeholder="Yandex query embedding URI" />
+              <input name="base_url" defaultValue={configValue(profile, "base_url")} placeholder="OpenAI-compatible base URL" />
+              <input name="evaluation_model" defaultValue={configValue(profile, "evaluation_model")} placeholder="Chat/evaluation model" />
+              <input name="embedding_model" defaultValue={configValue(profile, "embedding_model")} placeholder="Embedding model" />
+              <input name="temperature" type="number" min={0} max={2} step={0.1} defaultValue={configValue(profile, "temperature")} placeholder="Temperature" />
+              <input name="max_tokens" type="number" min={128} step={128} defaultValue={configValue(profile, "max_tokens")} placeholder="Max tokens" />
+            </div>
+            <div className="admin-actions">
+              <button className="secondary" type="submit"><CheckCircle2 size={15} /> Сохранить</button>
+              <button className="secondary" type="button" disabled={profile.is_active} onClick={() => onActivate(profile)}>
+                <Activity size={15} /> Активировать
+              </button>
+              <button
+                className="danger"
+                type="button"
+                onClick={() => {
+                  if (window.confirm("Удалить AI-профиль? Секреты этого профиля будут удалены.")) {
+                    onDelete(profile);
+                  }
+                }}
+              >
+                <Trash2 size={15} /> Удалить
+              </button>
+            </div>
+          </form>
+        ))}
+        {!profiles.length && <p className="muted">AI-профили еще не добавлены. Пока используется конфигурация из окружения.</p>}
+      </div>
+    </section>
+  );
+}
+
+function configValue(profile: AIProviderConfig, key: string) {
+  const value = profile.config[key];
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function maskedPlaceholder(profile: AIProviderConfig, key: string, fallback: string) {
+  const masked = profile.credentials_masked[key];
+  return masked ? `${fallback}: ${masked}` : fallback;
 }
 
 function AdminTable({

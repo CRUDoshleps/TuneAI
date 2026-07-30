@@ -5,7 +5,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Material, MaterialChunk, MaterialIndexStatusEnum
-from app.services.yandex import YandexAIClient
+from app.services.ai_provider_runtime import TuneAIClient, get_active_ai_client
 
 
 def chunk_text(text: str, chunk_size: int = 1200, overlap: int = 160) -> list[str]:
@@ -23,8 +23,8 @@ def chunk_text(text: str, chunk_size: int = 1200, overlap: int = 160) -> list[st
     return chunks
 
 
-async def create_material_chunks(db: Session, material: Material, ai: YandexAIClient | None = None) -> list[MaterialChunk]:
-    ai = ai or YandexAIClient()
+async def create_material_chunks(db: Session, material: Material, ai: TuneAIClient | None = None) -> list[MaterialChunk]:
+    ai = ai or get_active_ai_client(db)
     for existing in list(db.scalars(select(MaterialChunk).where(MaterialChunk.material_id == material.id)).all()):
         db.delete(existing)
     db.flush()
@@ -44,7 +44,7 @@ async def create_material_chunks(db: Session, material: Material, ai: YandexAICl
     return chunks
 
 
-async def index_material(db: Session, material_id: str, ai: YandexAIClient | None = None) -> Material:
+async def index_material(db: Session, material_id: str, ai: TuneAIClient | None = None) -> Material:
     material = db.get(Material, material_id)
     if material is None:
         raise ValueError(f"Material {material_id} not found")
@@ -74,7 +74,7 @@ async def retrieve_context(
     question_id: str | None = None,
     query: str,
     limit: int = 5,
-    ai: YandexAIClient | None = None,
+    ai: TuneAIClient | None = None,
 ) -> list[str]:
     stmt = select(MaterialChunk).join(Material).where(
         MaterialChunk.test_id == test_id,
@@ -87,7 +87,7 @@ async def retrieve_context(
     rows = list(db.scalars(stmt).all())
     if not rows:
         return []
-    ai = ai or YandexAIClient()
+    ai = ai or get_active_ai_client(db)
     query_embedding = await ai.embed_query(query)
     scored = [(_cosine(query_embedding, row.embedding), row.text) for row in rows]
     scored.sort(key=lambda item: item[0], reverse=True)

@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     speechkit_result_url: str = "https://stt.api.cloud.yandex.net/stt/v3/getRecognition"
     yandex_data_logging_enabled: bool = False
     review_confidence_threshold: float = Field(default=0.75, ge=0, le=1)
+    runtime_ai_provider_config_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -133,9 +134,9 @@ class Settings(BaseSettings):
             errors.append("YANDEX_MOCK must be false")
         if self.demo_bootstrap_enabled:
             errors.append("DEMO_BOOTSTRAP_ENABLED must be false")
-        if not (self.yandex_api_key or self.yandex_iam_token):
+        if not self.runtime_ai_provider_config_enabled and not (self.yandex_api_key or self.yandex_iam_token):
             errors.append("Yandex credentials are required")
-        if not self.yandex_folder_id:
+        if not self.runtime_ai_provider_config_enabled and not self.yandex_folder_id:
             errors.append("YANDEX_FOLDER_ID is required")
         if errors:
             raise RuntimeError("Invalid production configuration: " + "; ".join(errors))

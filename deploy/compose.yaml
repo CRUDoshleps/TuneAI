@@ -3,9 +3,10 @@ name: tuneai
 x-backend-environment: &backend-environment
   APP_ENV: production
   POSTGRES_HOST: ${POSTGRES_HOST:?POSTGRES_HOST is required}
-  YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:?YANDEX_FOLDER_ID is required}
+  YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
   YANDEX_MOCK: "false"
   YANDEX_DATA_LOGGING_ENABLED: "false"
+  RUNTIME_AI_PROVIDER_CONFIG_ENABLED: ${RUNTIME_AI_PROVIDER_CONFIG_ENABLED:-true}
   CORS_ORIGINS: https://tuneai.vnshk.ru
   CORS_ALLOW_CREDENTIALS: "true"
   DOCS_ENABLED: "false"

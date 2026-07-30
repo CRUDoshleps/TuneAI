@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from app.models import AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, MaterialIndexStatusEnum, RoleEnum, TestStatusEnum, TestTypeEnum
+from app.models import AIProviderEnum, AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, MaterialIndexStatusEnum, RoleEnum, TestStatusEnum, TestTypeEnum
 
 
 class TokenPair(BaseModel):
@@ -246,6 +246,36 @@ class AIReadiness(BaseModel):
     capabilities: list[str]
     review_confidence_threshold: float
     disclosure: str
+
+
+class AIProviderConfigCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    provider: AIProviderEnum
+    is_enabled: bool = True
+    is_active: bool = False
+    credentials: dict[str, str] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class AIProviderConfigUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    is_enabled: bool | None = None
+    is_active: bool | None = None
+    credentials: dict[str, str | None] | None = None
+    config: dict[str, Any] | None = None
+
+
+class AIProviderConfigRead(BaseModel):
+    id: str
+    name: str
+    provider: AIProviderEnum
+    is_enabled: bool
+    is_active: bool
+    credentials_masked: dict[str, str]
+    config: dict[str, Any]
+    created_by_id: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class SuspiciousAIInputRead(BaseModel):

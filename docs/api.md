@@ -66,6 +66,18 @@ GET /public/config
 
 Возвращает runtime-конфигурацию frontend для брендинга и демо-сценариев.
 
+## AI Providers
+
+```text
+GET /admin/ai-providers
+POST /admin/ai-providers
+PATCH /admin/ai-providers/{provider_id}
+POST /admin/ai-providers/{provider_id}/activate
+DELETE /admin/ai-providers/{provider_id}
+```
+
+Endpoints доступны только администратору. Секреты принимаются в `credentials`, но в read-ответах возвращаются только как `credentials_masked`.
+
 ## Demo Bootstrap
 
 ```text

@@ -75,6 +75,12 @@ class MaterialIndexStatusEnum(str, enum.Enum):
     failed = "failed"
 
 
+class AIProviderEnum(str, enum.Enum):
+    mock = "mock"
+    yandex = "yandex"
+    openai_compatible = "openai_compatible"
+
+
 class OutboxStatusEnum(str, enum.Enum):
     pending = "pending"
     published = "published"
@@ -233,6 +239,21 @@ class MaterialChunk(Base):
     embedding: Mapped[list[float]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
 
     material: Mapped[Material] = relationship(back_populates="chunks")
+
+
+class AIProviderConfig(Base):
+    __tablename__ = "ai_provider_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider: Mapped[AIProviderEnum] = mapped_column(Enum(AIProviderEnum), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    credentials: Mapped[dict[str, Any]] = mapped_column(MutableDict.as_mutable(json_type()), default=dict, nullable=False)
+    config: Mapped[dict[str, Any]] = mapped_column(MutableDict.as_mutable(json_type()), default=dict, nullable=False)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class OutboxEvent(Base):
