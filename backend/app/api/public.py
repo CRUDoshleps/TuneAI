@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.security import create_token, hash_password
 from app.db.session import get_db
-from app.models import Assignment, Material, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
+from app.models import Assignment, Material, MaterialIndexStatusEnum, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
 from app.schemas import DemoBootstrapRead, DemoBootstrapRequest, PublicConfigRead, TokenPair, UserRead
 from app.api.tests import _serialize_test
+from app.services.demo_cleanup import cleanup_expired_demo_data, demo_expiration, recent_demo_user_count
 from app.services.moderation import censor_text
-from app.services.rag import create_material_chunks
-from app.services.yandex import YandexAIClient
+from app.services.outbox import MATERIAL_UPLOADED, add_outbox_event
 
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -50,14 +50,20 @@ async def demo_bootstrap(
     settings = get_settings()
     if not settings.demo_bootstrap_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Demo bootstrap is disabled")
+    cleanup_expired_demo_data(db)
+    if recent_demo_user_count(db) >= settings.demo_bootstrap_limit_per_hour:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Demo bootstrap limit exceeded")
 
     stamp = int(time.time() * 1000)
     role = _demo_role(payload.test_type)
+    expires_at = demo_expiration(settings.demo_bootstrap_ttl_hours)
     user = User(
         email=f"demo-{payload.scenario_id}-{stamp}@tuneai.dev",
         full_name=f"{payload.role_label} демо",
         hashed_password=hash_password("password123"),
         role=role,
+        is_demo=True,
+        expires_at=expires_at,
     )
     db.add(user)
     db.flush()
@@ -78,11 +84,14 @@ async def demo_bootstrap(
             "material_policy": "test_and_question",
         },
         owner_id=owner.id,
+        is_demo=True,
+        expires_at=expires_at,
     )
     test.questions.append(
         Question(
             text=censor_text(payload.question),
             expected_answer=censor_text(payload.expected_answer),
+            competencies=[{"name": item, "weight": 1} for item in payload.competencies],
             order_index=0,
             max_score=10,
         )
@@ -99,10 +108,11 @@ async def demo_bootstrap(
             f"{payload.expected_answer} RAG извлекает релевантные фрагменты из материалов "
             "и связывает обратную связь с контекстом сценария."
         ),
+        index_status=MaterialIndexStatusEnum.pending,
     )
     db.add(material)
     db.flush()
-    await create_material_chunks(db, material, YandexAIClient())
+    add_outbox_event(db, MATERIAL_UPLOADED, material.id, {"material_id": material.id, "test_id": test.id})
     if payload.test_type != TestTypeEnum.self_training:
         db.add(Assignment(test_id=test.id, user_id=user.id, created_by_id=owner.id))
     db.commit()

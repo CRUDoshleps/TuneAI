@@ -1,8 +1,11 @@
 import pytest
+from sqlalchemy import select
 
 from app.db.session import SessionLocal
-from app.models import Answer, OutboxEvent, OutboxStatusEnum
+from app.models import Answer, AnswerStatusEnum, Material, OutboxEvent, OutboxStatusEnum
+from app.services.outbox import ANSWER_UPLOADED, MATERIAL_UPLOADED
 from app.services.processing import process_answer_uploaded
+from app.services.rag import index_material
 from app.tests.conftest import auth_header, register_and_login
 
 
@@ -82,6 +85,13 @@ def assign_test_to_current_user(client, manager_token, target_token, test_id):
     assert assigned.status_code == 204, assigned.text
 
 
+async def index_test_materials(test_id: str) -> None:
+    with SessionLocal() as db:
+        material_ids = list(db.scalars(select(Material.id).where(Material.test_id == test_id)).all())
+        for material_id in material_ids:
+            await index_material(db, material_id)
+
+
 @pytest.mark.asyncio
 async def test_audio_upload_creates_outbox_event_and_processing_completes(client):
     admin_token = register_and_login(client, "admin@example.com")
@@ -98,6 +108,8 @@ async def test_audio_upload_creates_outbox_event_and_processing_completes(client
         },
     )
     assert material.status_code == 201, material.text
+    assert material.json()["index_status"] == "pending"
+    await index_test_materials(test["id"])
 
     attempt_response = client.post(
         "/attempts",
@@ -117,7 +129,8 @@ async def test_audio_upload_creates_outbox_event_and_processing_completes(client
     assert answer["status"] == "queued_for_transcription"
 
     with SessionLocal() as db:
-        outbox = db.query(OutboxEvent).one()
+        outbox = db.scalar(select(OutboxEvent).where(OutboxEvent.event_type == ANSWER_UPLOADED))
+        assert outbox is not None
         assert outbox.status == OutboxStatusEnum.pending
         processed = await process_answer_uploaded(db, answer_id=answer["id"])
         assert processed.status.value == "completed"
@@ -173,7 +186,19 @@ async def test_teacher_reviews_low_confidence_answer_and_overrides_attempt_total
         },
     )
     assert material.status_code == 201, material.text
+    await index_test_materials(test["id"])
 
+    student_response = client.post(
+        "/users",
+        headers=auth_header(teacher_token),
+        json={
+            "email": "student@example.com",
+            "full_name": "Managed Student",
+            "password": "password123",
+            "role": "student",
+        },
+    )
+    assert student_response.status_code == 201, student_response.text
     student_token = register_and_login(client, "student@example.com")
     assign_test_to_current_user(client, teacher_token, student_token, test["id"])
     attempt_response = client.post(
@@ -258,6 +283,9 @@ def test_questions_are_hidden_until_attempt_reveals_them(client):
     attempt = attempt_response.json()
     assert [question["id"] for question in attempt["questions"]] == [first_question_id]
     assert "expected_answer" not in attempt["questions"][0]
+    result_before_answer = client.get(f"/attempts/{attempt['id']}/result", headers=auth_header(student_token))
+    assert result_before_answer.status_code == 200
+    assert [question["id"] for question in result_before_answer.json()["questions"]] == [first_question_id]
 
     premature_upload = client.post(
         f"/attempts/{attempt['id']}/questions/{second_question_id}/audio",
@@ -269,11 +297,18 @@ def test_questions_are_hidden_until_attempt_reveals_them(client):
 
     first_upload = client.post(
         f"/attempts/{attempt['id']}/questions/{first_question_id}/audio",
-        headers=auth_header(student_token),
+        headers={**auth_header(student_token), "Idempotency-Key": "first-audio-answer"},
         files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
     )
     assert first_upload.status_code == 201, first_upload.text
     assert [question["id"] for question in first_upload.json()["questions"]] == [first_question_id, second_question_id]
+    replay = client.post(
+        f"/attempts/{attempt['id']}/questions/{first_question_id}/audio",
+        headers={**auth_header(student_token), "Idempotency-Key": "first-audio-answer"},
+        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+    )
+    assert replay.status_code == 201
+    assert replay.json()["answers"][0]["id"] == first_upload.json()["answers"][0]["id"]
 
 
 def test_student_does_not_see_unassigned_published_self_training(client):
@@ -323,9 +358,11 @@ def test_admin_can_delete_material_and_empty_test(client):
         json={"test_id": test["id"]},
     )
     assert attempted.status_code == 201, attempted.text
-    blocked_delete = client.delete(f"/tests/{test['id']}", headers=auth_header(admin_token))
-    assert blocked_delete.status_code == 409
-    assert blocked_delete.json()["detail"] == "Test has attempts and cannot be deleted"
+    archived_delete = client.delete(f"/tests/{test['id']}", headers=auth_header(admin_token))
+    assert archived_delete.status_code == 204
+    archived = client.get(f"/tests/{test['id']}", headers=auth_header(admin_token))
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "archived"
 
     empty_test = client.post(
         "/tests",
@@ -422,6 +459,7 @@ async def test_text_answer_skips_speechkit_and_completes_processing(client):
         },
     )
     assert material.status_code == 201, material.text
+    await index_test_materials(test["id"])
     attempt_response = client.post("/attempts", headers=auth_header(admin_token), json={"test_id": test["id"]})
     assert attempt_response.status_code == 201, attempt_response.text
     attempt = attempt_response.json()
@@ -435,13 +473,109 @@ async def test_text_answer_skips_speechkit_and_completes_processing(client):
     assert submitted.status_code == 201, submitted.text
     answer = submitted.json()["answers"][0]
     assert answer["answer_type"] == "text"
-    assert answer["status"] == "completed"
-    assert answer["transcript"] == "Transactional outbox saves the answer and event atomically."
-    assert answer["evaluation"]["grounded"] is True
+    assert answer["status"] == "queued_for_transcription"
+
+    replay = client.post(
+        f"/attempts/{attempt['id']}/questions/{test['questions'][0]['id']}/text",
+        headers={**auth_header(admin_token), "Idempotency-Key": "text-answer-1"},
+        json={"text": "Different body should not create another answer."},
+    )
+    assert replay.status_code == 201
+    assert replay.json()["answers"][0]["id"] == answer["id"]
+
+    with SessionLocal() as db:
+        outbox = db.scalar(select(OutboxEvent).where(OutboxEvent.event_type == ANSWER_UPLOADED, OutboxEvent.aggregate_id == answer["id"]))
+        assert outbox is not None
+        processed = await process_answer_uploaded(db, answer_id=answer["id"])
+        assert processed.status.value == "completed"
 
     result = client.get(f"/attempts/{attempt['id']}/result", headers=auth_header(admin_token))
     assert result.status_code == 200
+    assert result.json()["answers"][0]["transcript"] == "Transactional outbox saves the answer and event atomically."
     assert result.json()["answers"][0]["review_status"] == "review_recommended"
+
+
+def test_failed_answer_can_be_retried_with_new_idempotency_key(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    test = create_sample_test(client, admin_token)
+    attempt_response = client.post("/attempts", headers=auth_header(admin_token), json={"test_id": test["id"]})
+    assert attempt_response.status_code == 201, attempt_response.text
+    attempt = attempt_response.json()
+
+    submitted = client.post(
+        f"/attempts/{attempt['id']}/questions/{test['questions'][0]['id']}/text",
+        headers={**auth_header(admin_token), "Idempotency-Key": "failed-text-1"},
+        json={"text": "First body"},
+    )
+    assert submitted.status_code == 201, submitted.text
+    answer_id = submitted.json()["answers"][0]["id"]
+
+    with SessionLocal() as db:
+        answer = db.get(Answer, answer_id)
+        assert answer is not None
+        answer.status = AnswerStatusEnum.failed
+        db.add(answer)
+        db.commit()
+
+    retry = client.post(
+        f"/attempts/{attempt['id']}/questions/{test['questions'][0]['id']}/text",
+        headers={**auth_header(admin_token), "Idempotency-Key": "failed-text-2"},
+        json={"text": "Retry body"},
+    )
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["answers"][0]["id"] == answer_id
+    assert retry.json()["answers"][0]["status"] == "queued_for_transcription"
+
+    with SessionLocal() as db:
+        answer = db.get(Answer, answer_id)
+        assert answer is not None
+        assert answer.idempotency_key == "failed-text-2"
+        assert answer.text_response == "Retry body"
+
+
+@pytest.mark.asyncio
+async def test_question_weighted_competencies_drive_analytics(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    response = client.post(
+        "/tests",
+        headers=auth_header(admin_token),
+        json={
+            "title": "Weighted competency exam",
+            "test_type": "self_training",
+            "questions": [
+                {
+                    "text": "Explain RAG reliability?",
+                    "expected_answer": "Mention retrieval and reliability.",
+                    "competencies": [{"name": "RAG", "weight": 3}, {"name": "Reliability", "weight": 1}],
+                    "max_score": 12,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    test = client.patch(f"/tests/{response.json()['id']}", headers=auth_header(admin_token), json={"status": "published"}).json()
+    attempt_response = client.post("/attempts", headers=auth_header(admin_token), json={"test_id": test["id"]})
+    answer_response = client.post(
+        f"/attempts/{attempt_response.json()['id']}/questions/{test['questions'][0]['id']}/text",
+        headers={**auth_header(admin_token), "Idempotency-Key": "weighted-text"},
+        json={"text": "RAG retrieves relevant context and reliability depends on stable processing."},
+    )
+    assert answer_response.status_code == 201, answer_response.text
+    answer_id = answer_response.json()["answers"][0]["id"]
+    with SessionLocal() as db:
+        processed = await process_answer_uploaded(db, answer_id=answer_id)
+        assert processed.evaluation["competency_scores"]["RAG"] == pytest.approx(6.12)
+        assert processed.evaluation["competency_scores"]["Reliability"] == pytest.approx(2.04)
+        assert processed.evaluation["competency_max_scores"]["RAG"] == pytest.approx(9)
+        assert processed.evaluation["competency_max_scores"]["Reliability"] == pytest.approx(3)
+
+    analytics = client.get("/analytics/competencies", headers=auth_header(admin_token))
+    assert analytics.status_code == 200
+    rows = {item["name"]: item for item in analytics.json()}
+    assert rows["RAG"]["score"] == pytest.approx(6.12)
+    assert rows["RAG"]["max_score"] == pytest.approx(9)
+    assert rows["Reliability"]["score"] == pytest.approx(2.04)
+    assert rows["Reliability"]["max_score"] == pytest.approx(3)
 
 
 def test_examinee_sees_only_assigned_exam_and_no_public_self_training(client):
@@ -537,3 +671,64 @@ def test_user_cannot_read_another_users_attempt(client):
         headers=auth_header(first_student),
     )
     assert allowed.status_code == 200
+
+
+def test_methodist_manages_own_learners_and_assignments(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    methodist_response = client.post(
+        "/users",
+        headers=auth_header(admin_token),
+        json={
+            "email": "methodist@example.com",
+            "full_name": "Course Methodist",
+            "password": "password123",
+            "role": "methodist",
+        },
+    )
+    assert methodist_response.status_code == 201, methodist_response.text
+    methodist_token = register_and_login(client, "methodist@example.com")
+    forbidden_staff_create = client.post(
+        "/users",
+        headers=auth_header(methodist_token),
+        json={
+            "email": "teacher-from-methodist@example.com",
+            "full_name": "Teacher",
+            "password": "password123",
+            "role": "teacher",
+        },
+    )
+    assert forbidden_staff_create.status_code == 403
+
+    learner_response = client.post(
+        "/users",
+        headers=auth_header(methodist_token),
+        json={
+            "email": "learner@example.com",
+            "full_name": "Managed Learner",
+            "password": "password123",
+            "role": "examinee",
+        },
+    )
+    assert learner_response.status_code == 201, learner_response.text
+    assert learner_response.json()["created_by_id"] == methodist_response.json()["id"]
+
+    visible_users = client.get("/users", headers=auth_header(methodist_token))
+    assert visible_users.status_code == 200
+    assert [item["email"] for item in visible_users.json()] == ["learner@example.com"]
+
+    test = create_sample_test(client, methodist_token)
+    assigned = client.post(
+        f"/tests/{test['id']}/assign",
+        headers=auth_header(methodist_token),
+        json={"user_id": learner_response.json()["id"]},
+    )
+    assert assigned.status_code == 204, assigned.text
+
+    outsider_token = register_and_login(client, "outsider@example.com")
+    outsider = client.get("/auth/me", headers=auth_header(outsider_token))
+    forbidden_assignment = client.post(
+        f"/tests/{test['id']}/assign",
+        headers=auth_header(methodist_token),
+        json={"user_id": outsider.json()["id"]},
+    )
+    assert forbidden_assignment.status_code == 403

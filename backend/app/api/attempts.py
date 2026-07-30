@@ -28,7 +28,7 @@ from app.schemas import (
     TextAnswerRequest,
     ReviewQueueItem,
 )
-from app.services.processing import _refresh_attempt_totals, process_answer_uploaded
+from app.services.processing import _refresh_attempt_totals
 from app.services.outbox import ANSWER_UPLOADED, add_outbox_event
 from app.services.storage import StorageService
 from app.services.access_control import can_manage_test, can_take_test
@@ -139,7 +139,7 @@ def get_attempt_result(
 ) -> AttemptResultRead:
     attempt = _load_attempt(db, attempt_id)
     _ensure_attempt_access(attempt, user)
-    return _serialize_attempt_result(attempt)
+    return _serialize_attempt_result(db, attempt, user)
 
 
 @router.post("/{attempt_id}/questions/{question_id}/audio", response_model=AttemptRead, status_code=status.HTTP_201_CREATED)
@@ -157,14 +157,16 @@ async def upload_answer_audio(
     question = db.get(Question, question_id)
     if not question or question.test_id != attempt.test_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
+    if existing and idempotency_key and existing.idempotency_key == idempotency_key:
+        return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
     if not _can_manage_attempt(attempt, user):
         current_question = _current_answerable_question(db, attempt)
         if current_question is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Attempt already has answers for all questions")
         if question.id != current_question.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Question is not revealed yet")
-    existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
-    if existing and existing.status not in {AnswerStatusEnum.failed}:
+    if existing and existing.status != AnswerStatusEnum.failed:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Question already has an answer")
 
     content = await file.read()
@@ -206,14 +208,16 @@ async def submit_text_answer(
     question = db.get(Question, question_id)
     if not question or question.test_id != attempt.test_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
+    if existing and idempotency_key and existing.idempotency_key == idempotency_key:
+        return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
     if not _can_manage_attempt(attempt, user):
         current_question = _current_answerable_question(db, attempt)
         if current_question is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Attempt already has answers for all questions")
         if question.id != current_question.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Question is not revealed yet")
-    existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
-    if existing and existing.status not in {AnswerStatusEnum.failed}:
+    if existing and existing.status != AnswerStatusEnum.failed:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Question already has an answer")
 
     answer = existing or Answer(id=new_id(), attempt_id=attempt.id, question_id=question.id)
@@ -225,8 +229,13 @@ async def submit_text_answer(
     answer.status = AnswerStatusEnum.queued_for_transcription
     answer.error_message = None
     db.add(answer)
+    add_outbox_event(
+        db,
+        event_type=ANSWER_UPLOADED,
+        aggregate_id=answer.id,
+        payload={"answer_id": answer.id, "attempt_id": attempt.id, "question_id": question.id},
+    )
     db.commit()
-    await process_answer_uploaded(db, answer_id=answer.id)
     ANSWERS_CREATED.inc()
     return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
 
@@ -355,6 +364,7 @@ def _serialize_attempt(db: Session, attempt: Attempt, user: User) -> AttemptRead
             AttemptQuestionRead(
                 id=question.id,
                 text=question.text,
+                competencies=question.competencies or [],
                 order_index=question.order_index,
                 max_score=question.max_score,
             )
@@ -363,7 +373,7 @@ def _serialize_attempt(db: Session, attempt: Attempt, user: User) -> AttemptRead
     )
 
 
-def _serialize_attempt_result(attempt: Attempt) -> AttemptResultRead:
+def _serialize_attempt_result(db: Session, attempt: Attempt, user: User) -> AttemptResultRead:
     from app.schemas import AnswerResultRead
 
     rows: list[AnswerResultRead] = []
@@ -406,10 +416,11 @@ def _serialize_attempt_result(attempt: Attempt) -> AttemptResultRead:
             AttemptQuestionRead(
                 id=question.id,
                 text=question.text,
+                competencies=question.competencies or [],
                 order_index=question.order_index,
                 max_score=question.max_score,
             )
-            for question in sorted(attempt.test.questions, key=lambda item: item.order_index)
+            for question in _visible_questions(db, attempt, user)
         ],
         answers=rows,
     )

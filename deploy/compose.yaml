@@ -14,6 +14,9 @@ x-backend-environment: &backend-environment
   STORAGE_BACKEND: local
   UPLOAD_DIR: /data/uploads
   MAX_UPLOAD_MB: "50"
+  DEMO_BOOTSTRAP_ENABLED: "false"
+  DEMO_BOOTSTRAP_LIMIT_PER_HOUR: ${DEMO_BOOTSTRAP_LIMIT_PER_HOUR:-30}
+  DEMO_BOOTSTRAP_TTL_HOURS: ${DEMO_BOOTSTRAP_TTL_HOURS:-24}
   TEST_CREATOR_ROLES: ${TEST_CREATOR_ROLES:-student,methodist,teacher,interviewer,admin}
   ANSWER_REVIEWER_ROLES: ${ANSWER_REVIEWER_ROLES:-teacher,interviewer,admin}
 

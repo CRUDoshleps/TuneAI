@@ -44,3 +44,17 @@ def test_public_tuneai_settings_accept_next_public_aliases(monkeypatch):
 
     assert settings.tuneai_product_name == "Runtime Product"
     assert settings.tuneai_consultation_email == "runtime@example.com"
+
+
+def test_cors_allows_idempotency_key_header(client):
+    response = client.options(
+        "/attempts/example/questions/example/text",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type,idempotency-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "idempotency-key" in response.headers["access-control-allow-headers"].lower()

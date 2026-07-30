@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.deps import can_create_tests, get_current_user
-from app.models import Answer, Assignment, Attempt, Question, RoleEnum, Test, TestTypeEnum, User
+from app.models import Answer, Assignment, Attempt, Material, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
 from app.schemas import AssignRequest, QuestionCreate, QuestionRead, QuestionReorderRequest, QuestionUpdate, TestCreate, TestRead, TestUpdate
 from app.services.moderation import censor_content, censor_text
 from app.services.access_control import can_manage_test, can_view_test
@@ -52,6 +52,7 @@ def create_test(
             Question(
                 text=censor_text(question.text),
                 expected_answer=censor_text(question.expected_answer),
+                competencies=[item.model_dump() for item in question.competencies],
                 order_index=question.order_index,
                 max_score=question.max_score,
             )
@@ -107,6 +108,7 @@ def add_question(
         test_id=test.id,
         text=censor_text(payload.text),
         expected_answer=censor_text(payload.expected_answer),
+        competencies=[item.model_dump() for item in payload.competencies],
         order_index=payload.order_index,
         max_score=payload.max_score,
     )
@@ -132,6 +134,8 @@ def update_question(
     for field, value in payload.model_dump(exclude_unset=True).items():
         if field in {"text", "expected_answer"} and value is not None:
             value = censor_text(value)
+        elif field == "competencies" and value is not None:
+            value = [{"name": str(item["name"]).strip(), "weight": float(item["weight"])} for item in value]
         setattr(question, field, value)
     db.add(question)
     db.commit()
@@ -154,6 +158,8 @@ def delete_question(
     answers_count = db.scalar(select(func.count(Answer.id)).where(Answer.question_id == question.id)) or 0
     if answers_count:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Question has answers and cannot be deleted")
+    for material in list(db.scalars(select(Material).where(Material.question_id == question.id)).all()):
+        db.delete(material)
     db.delete(question)
     db.commit()
 
@@ -195,6 +201,9 @@ def assign_test(
     target = db.get(User, payload.user_id)
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
+    if user.role != RoleEnum.admin:
+        if target.role not in {RoleEnum.student, RoleEnum.examinee, RoleEnum.candidate} or target.created_by_id != user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managed learner users can be assigned")
     db.add(Assignment(test_id=test.id, user_id=target.id, created_by_id=user.id))
     try:
         db.commit()
@@ -213,7 +222,12 @@ def delete_test(
     _ensure_manager(test, user)
     attempts_count = db.scalar(select(func.count(Attempt.id)).where(Attempt.test_id == test.id)) or 0
     if attempts_count:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Test has attempts and cannot be deleted")
+        test.status = TestStatusEnum.archived
+        db.add(test)
+        db.commit()
+        return
+    for material in list(db.scalars(select(Material).where(Material.test_id == test.id)).all()):
+        db.delete(material)
     db.delete(test)
     db.commit()
 
@@ -238,6 +252,8 @@ def _serialize_test(test: Test, user: User) -> dict:
         "criteria": test.criteria,
         "time_limit_seconds": test.time_limit_seconds,
         "owner_id": test.owner_id,
+        "is_demo": test.is_demo,
+        "expires_at": test.expires_at,
         "created_at": test.created_at,
         "question_count": len(questions),
         "questions": questions if can_manage else [],

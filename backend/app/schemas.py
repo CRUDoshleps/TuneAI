@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from app.models import AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, RoleEnum, TestStatusEnum, TestTypeEnum
+from app.models import AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, MaterialIndexStatusEnum, RoleEnum, TestStatusEnum, TestTypeEnum
 
 
 class TokenPair(BaseModel):
@@ -33,6 +33,9 @@ class UserRead(BaseModel):
     full_name: str
     role: RoleEnum
     is_active: bool
+    is_demo: bool = False
+    expires_at: datetime | None = None
+    created_by_id: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -45,14 +48,27 @@ class UserCreateAdmin(BaseModel):
     role: RoleEnum
 
 
+class UserCreateStaff(BaseModel):
+    email: EmailStr
+    full_name: str
+    password: str = Field(min_length=8, max_length=128)
+    role: RoleEnum = RoleEnum.student
+
+
 class UserRoleUpdate(BaseModel):
     role: RoleEnum
     is_active: bool | None = None
 
 
+class QuestionCompetency(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    weight: float = Field(default=1, gt=0)
+
+
 class QuestionCreate(BaseModel):
     text: str = Field(min_length=5)
     expected_answer: str = ""
+    competencies: list[QuestionCompetency] = []
     order_index: int = 0
     max_score: float = Field(default=10, gt=0)
 
@@ -60,6 +76,7 @@ class QuestionCreate(BaseModel):
 class QuestionUpdate(BaseModel):
     text: str | None = Field(default=None, min_length=5)
     expected_answer: str | None = None
+    competencies: list[QuestionCompetency] | None = None
     order_index: int | None = None
     max_score: float | None = Field(default=None, gt=0)
 
@@ -72,6 +89,7 @@ class QuestionRead(BaseModel):
     id: str
     text: str
     expected_answer: str
+    competencies: list[QuestionCompetency] = []
     order_index: int
     max_score: float
 
@@ -81,6 +99,7 @@ class QuestionRead(BaseModel):
 class AttemptQuestionRead(BaseModel):
     id: str
     text: str
+    competencies: list[QuestionCompetency] = []
     order_index: int
     max_score: float
 
@@ -113,6 +132,8 @@ class TestRead(BaseModel):
     criteria: dict[str, Any]
     time_limit_seconds: int | None
     owner_id: str
+    is_demo: bool = False
+    expires_at: datetime | None = None
     created_at: datetime
     question_count: int = 0
     questions: list[QuestionRead] = []
@@ -288,7 +309,7 @@ class MaterialCreate(BaseModel):
     test_id: str
     question_id: str | None = None
     title: str = Field(min_length=3, max_length=255)
-    content: str = Field(min_length=20)
+    content: str = Field(min_length=20, max_length=5 * 1024 * 1024)
 
 
 class MaterialRead(BaseModel):
@@ -297,6 +318,8 @@ class MaterialRead(BaseModel):
     question_id: str | None = None
     title: str
     source_filename: str | None = None
+    index_status: MaterialIndexStatusEnum = MaterialIndexStatusEnum.pending
+    index_error: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

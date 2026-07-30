@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import Material
+from app.models import Material, MaterialIndexStatusEnum
 from app.services.rag import chunk_text, create_material_chunks, retrieve_context
 
 
@@ -21,6 +21,7 @@ async def test_retrieve_context_returns_material_chunks(db_session):
     db_session.add(material)
     db_session.flush()
     await create_material_chunks(db_session, material)
+    material.index_status = MaterialIndexStatusEnum.indexed
     db_session.commit()
 
     context = await retrieve_context(
@@ -60,6 +61,9 @@ async def test_retrieve_context_uses_test_materials_and_current_question_only(db
     await create_material_chunks(db_session, general)
     await create_material_chunks(db_session, first_question)
     await create_material_chunks(db_session, second_question)
+    general.index_status = MaterialIndexStatusEnum.indexed
+    first_question.index_status = MaterialIndexStatusEnum.indexed
+    second_question.index_status = MaterialIndexStatusEnum.indexed
     db_session.commit()
 
     context = await retrieve_context(

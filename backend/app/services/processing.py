@@ -89,12 +89,14 @@ async def process_answer_uploaded(
             max_score=question.max_score,
         )
         result.source_excerpts = context[:3]
-        result.competency_scores = _competency_scores(attempt.test.criteria, result.score)
+        competency_scores, competency_max_scores = _competency_scores(question, attempt.test.criteria, result.score, result.max_score)
+        result.competency_scores = competency_scores
         result.grounded = bool(context)
         result.review_recommended = (
             result.confidence < ai.settings.review_confidence_threshold or not result.grounded or safety.detected
         )
         payload = result.model_dump()
+        payload["competency_max_scores"] = competency_max_scores
         payload["ai_safety"] = safety.model_dump()
         answer.evaluation = payload
         answer.score = result.score
@@ -130,12 +132,27 @@ def _refresh_attempt_totals(db: Session, attempt: Attempt) -> None:
     db.add(attempt)
 
 
-def _competency_scores(criteria: dict, score: float) -> dict[str, float]:
+def _competency_scores(question: Question, criteria: dict, score: float, max_score: float) -> tuple[dict[str, float], dict[str, float]]:
+    question_competencies = [
+        (str(item.get("name", "")).strip(), float(item.get("weight", 1)))
+        for item in (question.competencies or [])
+        if str(item.get("name", "")).strip() and float(item.get("weight", 1)) > 0
+    ]
+    if question_competencies:
+        total_weight = sum(weight for _, weight in question_competencies)
+        return (
+            {name: round(score * weight / total_weight, 2) for name, weight in question_competencies},
+            {name: round(max_score * weight / total_weight, 2) for name, weight in question_competencies},
+        )
     raw = criteria.get("competencies") if criteria else None
     if not isinstance(raw, list):
-        return {}
+        return {}, {}
     competencies = [str(item).strip() for item in raw if str(item).strip()]
     if not competencies:
-        return {}
+        return {}, {}
     per_competency = round(score / len(competencies), 2)
-    return {competency: per_competency for competency in competencies}
+    per_competency_max = round(max_score / len(competencies), 2)
+    return (
+        {competency: per_competency for competency in competencies},
+        {competency: per_competency_max for competency in competencies},
+    )

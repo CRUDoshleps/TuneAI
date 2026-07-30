@@ -4,10 +4,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.deps import get_current_user
-from app.models import Material, Question, RoleEnum, Test, User
+from app.models import Material, MaterialIndexStatusEnum, Question, RoleEnum, Test, User
 from app.schemas import MaterialCreate, MaterialRead
-from app.services.rag import create_material_chunks
-from app.services.yandex import YandexAIClient
+from app.services.outbox import MATERIAL_UPLOADED, add_outbox_event
 
 
 router = APIRouter(prefix="/materials", tags=["materials"])
@@ -50,10 +49,11 @@ async def create_material(
         owner_id=user.id,
         title=payload.title,
         content=payload.content,
+        index_status=MaterialIndexStatusEnum.pending,
     )
     db.add(material)
     db.flush()
-    await create_material_chunks(db, material, YandexAIClient())
+    add_outbox_event(db, MATERIAL_UPLOADED, material.id, {"material_id": material.id, "test_id": test.id})
     db.commit()
     db.refresh(material)
     return material
@@ -69,7 +69,10 @@ async def upload_material(
 ) -> Material:
     if file.content_type not in {"text/plain", "text/markdown", "application/octet-stream"}:
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Only text material is supported")
-    content = (await file.read()).decode("utf-8", errors="replace")
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Material file is too large")
+    content = raw.decode("utf-8", errors="replace")
     payload = MaterialCreate(
         test_id=test_id,
         question_id=question_id,

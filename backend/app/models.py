@@ -69,6 +69,12 @@ class AnswerTypeEnum(str, enum.Enum):
     text = "text"
 
 
+class MaterialIndexStatusEnum(str, enum.Enum):
+    pending = "pending"
+    indexed = "indexed"
+    failed = "failed"
+
+
 class OutboxStatusEnum(str, enum.Enum):
     pending = "pending"
     published = "published"
@@ -84,6 +90,9 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[RoleEnum] = mapped_column(Enum(RoleEnum), default=RoleEnum.student, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     owned_tests: Mapped[list["Test"]] = relationship(back_populates="owner", foreign_keys="Test.owner_id")
@@ -101,11 +110,14 @@ class Test(Base):
     criteria: Mapped[dict[str, Any]] = mapped_column(MutableDict.as_mutable(json_type()), default=dict, nullable=False)
     time_limit_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     owner: Mapped[User] = relationship(back_populates="owned_tests", foreign_keys=[owner_id])
     questions: Mapped[list["Question"]] = relationship(back_populates="test", cascade="all, delete-orphan")
     assignments: Mapped[list["Assignment"]] = relationship(back_populates="test", cascade="all, delete-orphan")
+    materials: Mapped[list["Material"]] = relationship(back_populates="test", cascade="all, delete-orphan")
 
 
 class Question(Base):
@@ -116,11 +128,13 @@ class Question(Base):
     test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     expected_answer: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    competencies: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_score: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
 
     test: Mapped[Test] = relationship(back_populates="questions")
     answers: Mapped[list["Answer"]] = relationship(back_populates="question")
+    materials: Mapped[list["Material"]] = relationship(back_populates="question")
 
 
 class Assignment(Base):
@@ -196,8 +210,14 @@ class Material(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     source_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    index_status: Mapped[MaterialIndexStatusEnum] = mapped_column(
+        Enum(MaterialIndexStatusEnum), default=MaterialIndexStatusEnum.pending, nullable=False
+    )
+    index_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
+    test: Mapped[Test] = relationship(back_populates="materials")
+    question: Mapped[Question | None] = relationship(back_populates="materials")
     chunks: Mapped[list["MaterialChunk"]] = relationship(back_populates="material", cascade="all, delete-orphan")
 
 

@@ -4,7 +4,7 @@ import re
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Material, MaterialChunk
+from app.models import Material, MaterialChunk, MaterialIndexStatusEnum
 from app.services.yandex import YandexAIClient
 
 
@@ -25,6 +25,9 @@ def chunk_text(text: str, chunk_size: int = 1200, overlap: int = 160) -> list[st
 
 async def create_material_chunks(db: Session, material: Material, ai: YandexAIClient | None = None) -> list[MaterialChunk]:
     ai = ai or YandexAIClient()
+    for existing in list(db.scalars(select(MaterialChunk).where(MaterialChunk.material_id == material.id)).all()):
+        db.delete(existing)
+    db.flush()
     chunks: list[MaterialChunk] = []
     for index, chunk in enumerate(chunk_text(material.content)):
         embedding = await ai.embed_document(chunk)
@@ -41,6 +44,29 @@ async def create_material_chunks(db: Session, material: Material, ai: YandexAICl
     return chunks
 
 
+async def index_material(db: Session, material_id: str, ai: YandexAIClient | None = None) -> Material:
+    material = db.get(Material, material_id)
+    if material is None:
+        raise ValueError(f"Material {material_id} not found")
+    try:
+        material.index_status = MaterialIndexStatusEnum.pending
+        material.index_error = None
+        db.add(material)
+        db.commit()
+        await create_material_chunks(db, material, ai)
+        material.index_status = MaterialIndexStatusEnum.indexed
+        material.index_error = None
+        db.add(material)
+        db.commit()
+        return material
+    except Exception as exc:
+        material.index_status = MaterialIndexStatusEnum.failed
+        material.index_error = str(exc)[:4000]
+        db.add(material)
+        db.commit()
+        return material
+
+
 async def retrieve_context(
     db: Session,
     *,
@@ -50,7 +76,10 @@ async def retrieve_context(
     limit: int = 5,
     ai: YandexAIClient | None = None,
 ) -> list[str]:
-    stmt = select(MaterialChunk).where(MaterialChunk.test_id == test_id)
+    stmt = select(MaterialChunk).join(Material).where(
+        MaterialChunk.test_id == test_id,
+        Material.index_status == MaterialIndexStatusEnum.indexed,
+    )
     if question_id:
         stmt = stmt.where(or_(MaterialChunk.question_id.is_(None), MaterialChunk.question_id == question_id))
     else:

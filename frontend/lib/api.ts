@@ -3,6 +3,7 @@ import { censorContent, censorText } from "./moderation";
 export type Role = "student" | "examinee" | "candidate" | "methodist" | "teacher" | "interviewer" | "admin";
 export type TestStatus = "draft" | "published" | "archived";
 export type TestType = "exam" | "self_training" | "interview";
+export type QuestionCompetency = { name: string; weight: number };
 export type AnswerStatus =
   | "uploaded"
   | "queued_for_transcription"
@@ -44,6 +45,9 @@ export type User = {
   full_name: string;
   role: Role;
   is_active: boolean;
+  is_demo?: boolean;
+  expires_at?: string | null;
+  created_by_id?: string | null;
   created_at?: string;
 };
 
@@ -51,6 +55,7 @@ export type Question = {
   id: string;
   text: string;
   expected_answer: string;
+  competencies: QuestionCompetency[];
   order_index: number;
   max_score: number;
 };
@@ -58,6 +63,7 @@ export type Question = {
 export type AttemptQuestion = {
   id: string;
   text: string;
+  competencies: QuestionCompetency[];
   order_index: number;
   max_score: number;
 };
@@ -71,6 +77,8 @@ export type Test = {
   criteria: Record<string, unknown>;
   time_limit_seconds: number | null;
   owner_id: string;
+  is_demo?: boolean;
+  expires_at?: string | null;
   question_count: number;
   questions: Question[];
 };
@@ -170,6 +178,8 @@ export type Material = {
   question_id: string | null;
   title: string;
   source_filename: string | null;
+  index_status: "pending" | "indexed" | "failed";
+  index_error: string | null;
   created_at: string;
 };
 
@@ -230,6 +240,9 @@ const detailMessages: Record<string, string> = {
   "Use admin login": "Для администратора используйте отдельный вход в админку.",
   "Admin account required": "Для входа в админку нужен аккаунт администратора.",
   "Admin registration is closed": "Первый администратор уже создан. Новых администраторов добавляют из админ-панели.",
+  "Only staff users can list manageable users": "У вашей роли нет доступа к списку пользователей.",
+  "Only staff users can create manageable users": "У вашей роли нет прав на создание пользователей.",
+  "Staff users can create only learner accounts": "Преподаватель или методист может создавать только аккаунты учащихся и кандидатов.",
   "Authentication required": "Войдите в аккаунт, чтобы продолжить.",
   "Invalid token": "Сессия истекла. Войдите снова.",
   "Inactive or missing user": "Аккаунт недоступен. Обратитесь к администратору.",
@@ -248,6 +261,7 @@ const detailMessages: Record<string, string> = {
   "Test does not contain questions": "В тесте пока нет вопросов.",
   "Material not found": "Материал не найден или уже удален.",
   "Target user not found": "Пользователь не найден.",
+  "Only managed learner users can be assigned": "Назначать можно только учащихся, созданных в вашем контуре.",
   "User is already assigned": "Пользователь уже назначен на этот тест.",
   "Only attempt owner can upload answers": "Ответ можно отправить только из своей попытки.",
   "Question not found in this test": "Вопрос не найден в этом тесте.",
@@ -261,6 +275,7 @@ const detailMessages: Record<string, string> = {
   "Review score exceeds maximum": "Итоговый балл не может быть выше максимума за вопрос.",
   "Test is not assigned to this user": "Этот экзамен не назначен вашему аккаунту.",
   "Only text material is supported": "Загрузите материал в формате TXT или Markdown.",
+  "Material file is too large": "Материал слишком большой. Загрузите файл до 5 МБ.",
   "Unsupported audio type": "Формат записи не поддерживается. Попробуйте записать ответ еще раз.",
   "Audio file is too large": "Запись слишком большая. Сделайте ответ короче и отправьте снова.",
   "Too many requests": "Слишком много действий подряд. Подождите немного и попробуйте снова."

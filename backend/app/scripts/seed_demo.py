@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.core.security import hash_password
 from app.db.session import SessionLocal, init_db
-from app.models import Assignment, Material, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
+from app.models import Assignment, Material, MaterialIndexStatusEnum, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
 from app.services.rag import create_material_chunks
 from app.services.yandex import YandexAIClient
 
@@ -77,6 +77,7 @@ async def seed_demo() -> None:
             if question:
                 question.text = text
                 question.expected_answer = expected
+                question.competencies = [{"name": "Распределенные системы", "weight": 1}]
                 question.max_score = 10
             else:
                 db.add(
@@ -85,6 +86,7 @@ async def seed_demo() -> None:
                         order_index=order_index,
                         text=text,
                         expected_answer=expected,
+                        competencies=[{"name": "Распределенные системы", "weight": 1}],
                         max_score=10,
                     )
                 )
@@ -113,6 +115,10 @@ async def seed_demo() -> None:
             db.add(material)
             db.flush()
             await create_material_chunks(db, material, YandexAIClient())
+            material.index_status = MaterialIndexStatusEnum.indexed
+            material.index_error = None
+        else:
+            material.index_status = MaterialIndexStatusEnum.indexed
 
         exam = db.scalar(select(Test).where(Test.title == "Экзамен: распределенные системы"))
         if not exam:

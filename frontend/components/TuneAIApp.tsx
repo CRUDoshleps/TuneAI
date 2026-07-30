@@ -76,6 +76,12 @@ const TEST_STATUS_LABELS: Record<Test["status"], string> = {
   archived: "В архиве"
 };
 
+const MATERIAL_INDEX_LABELS: Record<Material["index_status"], string> = {
+  pending: "RAG индексируется",
+  indexed: "RAG готов",
+  failed: "Ошибка RAG"
+};
+
 const ATTEMPT_STATUS_LABELS: Record<Attempt["status"], string> = {
   started: "Идет попытка",
   processing: "Проверяем ответ",
@@ -97,6 +103,11 @@ const ANSWER_STATUS_LABELS: Record<Answer["status"], string> = {
 const DEFAULT_RUBRIC = "Оценить корректность, полноту, аргументацию и опору на материалы.";
 const DEFAULT_AGENT = "rubric-rag-reviewer";
 
+function newIdempotencyKey(prefix: string) {
+  const randomId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${randomId}`;
+}
+
 function getCriteriaString(test: Test | null, key: string, fallback = "") {
   const value = test?.criteria?.[key];
   return typeof value === "string" ? value : fallback;
@@ -108,18 +119,24 @@ function getCriteriaNumber(test: Test | null, key: string, fallback: number) {
 }
 
 function buildCriteriaFromForm(form: FormData) {
+  const competencies = parseCompetencies(String(form.get("competencies") || ""));
   return {
     rubric: String(form.get("rubric") || DEFAULT_RUBRIC),
-    competencies: String(form.get("competencies") || "")
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean),
+    competencies: competencies.map((item) => item.name),
     scenario: String(form.get("scenario") || form.get("test_type") || "exam"),
     agent_profile: String(form.get("agent_profile") || DEFAULT_AGENT),
     review_confidence_threshold: Number(form.get("review_confidence_threshold") || 0.78),
     strictness: String(form.get("strictness") || "balanced"),
     material_policy: String(form.get("material_policy") || "test_and_question")
   };
+}
+
+function parseCompetencies(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((name) => ({ name, weight: 1 }));
 }
 
 function buildCompetencyMap(attempts: Attempt[], tests: Test[]) {
@@ -299,6 +316,10 @@ export default function TuneAIApp() {
     await loadCompetencies(activeToken);
     if (activePlatformConfig.permissions.answerReviewerRoles.includes(me.role as PlatformRole)) {
       await loadReviewQueue(activeToken);
+    }
+    if (["teacher", "methodist", "interviewer"].includes(me.role)) {
+      const users = await apiFetch<User[]>("/users", {}, activeToken);
+      setAdminUsers(users);
     }
     if (me.role === "admin") {
       await loadAdmin(activeToken);
@@ -526,6 +547,7 @@ export default function TuneAIApp() {
               {
                 text: question,
                 expected_answer: String(form.get("expected_answer")),
+                competencies: parseCompetencies(String(form.get("competencies") || "")),
                 order_index: 0,
                 max_score: 10
               }
@@ -598,6 +620,7 @@ export default function TuneAIApp() {
           body: JSON.stringify({
             text: String(form.get("text")),
             expected_answer: String(form.get("expected_answer") || ""),
+            competencies: parseCompetencies(String(form.get("competencies") || "")),
             order_index: selectedTest.question_count,
             max_score: Number(form.get("max_score") || 10)
           })
@@ -839,7 +862,11 @@ export default function TuneAIApp() {
       form.append("file", blob, `answer.${extension}`);
       const nextAttempt = await apiFetch<Attempt>(
         `/attempts/${attempt.id}/questions/${questionId}/audio`,
-        { method: "POST", body: form },
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": newIdempotencyKey("audio") },
+          body: form
+        },
         token
       );
       setAttempt(nextAttempt);
@@ -861,6 +888,7 @@ export default function TuneAIApp() {
         `/attempts/${attempt.id}/questions/${questionId}/text`,
         {
           method: "POST",
+          headers: { "Idempotency-Key": newIdempotencyKey("text") },
           body: JSON.stringify({ text })
         },
         token
@@ -1685,12 +1713,13 @@ function BuilderPanel({
                 ))}
                 {!selectedTest.questions.length && <p className="muted">Вопросы появятся здесь после добавления.</p>}
               </div>
-              <form onSubmit={onAddQuestion} className="question-form">
-                <textarea name="text" placeholder="Новый вопрос" rows={3} required minLength={5} />
-                <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии" rows={3} />
-                <input name="max_score" type="number" min={1} step={1} defaultValue={10} />
-                <button className="primary" type="submit"><Plus size={17} /> Добавить вопрос</button>
-              </form>
+	              <form onSubmit={onAddQuestion} className="question-form">
+	                <textarea name="text" placeholder="Новый вопрос" rows={3} required minLength={5} />
+	                <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии" rows={3} />
+	                <input name="competencies" placeholder="Компетенции вопроса через запятую" />
+	                <input name="max_score" type="number" min={1} step={1} defaultValue={10} />
+	                <button className="primary" type="submit"><Plus size={17} /> Добавить вопрос</button>
+	              </form>
             </div>
           </>
         ) : (
@@ -1756,18 +1785,19 @@ function MaterialsAccessPanel({
               {materials.map((material) => {
                 const questionIndex = selectedTest.questions.findIndex((question) => question.id === material.question_id);
                 return (
-                  <span key={material.id}>
-                    {material.title}
-                    <small>
-                      {material.question_id && questionIndex >= 0 ? `Вопрос ${questionIndex + 1}` : "Весь тест"}
-                    </small>
-                  </span>
+	                  <span key={material.id}>
+	                    {material.title}
+	                    <small>
+	                      {material.question_id && questionIndex >= 0 ? `Вопрос ${questionIndex + 1}` : "Весь тест"} · {MATERIAL_INDEX_LABELS[material.index_status]}
+	                    </small>
+	                    {material.index_error && <small>{material.index_error}</small>}
+	                  </span>
                 );
               })}
               {!materials.length && <p className="muted">Материалы еще не добавлены.</p>}
             </div>
 
-            {user.role === "admin" && (
+            {assignableUsers.length > 0 && (
               <form onSubmit={onAssign} className="assign-form">
                 <div className="panel-title"><Users size={18} /> Назначить участника</div>
                 <select name="user_id" required defaultValue="">

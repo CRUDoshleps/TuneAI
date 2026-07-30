@@ -21,7 +21,7 @@ def competency_metrics(
 ) -> list[CompetencyMetricRead]:
     stmt = (
         select(Attempt)
-        .options(selectinload(Attempt.answers), selectinload(Attempt.test))
+        .options(selectinload(Attempt.answers).selectinload(Answer.question), selectinload(Attempt.test))
         .order_by(Attempt.started_at.desc())
         .limit(500)
     )
@@ -37,19 +37,21 @@ def competency_metrics(
     for attempt in attempts:
         if not _can_view_attempt_analytics(attempt, user):
             continue
-        competencies = _test_competencies(attempt.test)
         answers = [answer for answer in attempt.answers if answer.status == AnswerStatusEnum.completed]
         for answer in answers:
             evaluation = answer.evaluation or {}
+            competencies = _answer_competencies(answer, attempt.test)
             competency_scores = evaluation.get("competency_scores") or {}
+            competency_max_scores = evaluation.get("competency_max_scores") or {}
             for competency in competencies:
                 row = stats.setdefault(
                     competency,
                     {"score": 0.0, "max_score": 0.0, "completed": 0, "recommendations": []},
                 )
                 score = float(competency_scores.get(competency, answer.score or 0))
+                max_score = float(competency_max_scores.get(competency, answer.max_score or 0))
                 row["score"] = float(row["score"]) + score
-                row["max_score"] = float(row["max_score"]) + float(answer.max_score or 0)
+                row["max_score"] = float(row["max_score"]) + max_score
                 row["completed"] = int(row["completed"]) + 1
                 recommendation = str(evaluation.get("recommendations") or "").strip()
                 if recommendation and recommendation not in row["recommendations"]:
@@ -82,3 +84,14 @@ def _test_competencies(test: Test) -> list[str]:
         if values:
             return values
     return ["Общие навыки"]
+
+
+def _answer_competencies(answer: Answer, test: Test) -> list[str]:
+    values = [
+        str(item.get("name", "")).strip()
+        for item in (answer.question.competencies or [])
+        if str(item.get("name", "")).strip()
+    ]
+    if values:
+        return values
+    return _test_competencies(test)

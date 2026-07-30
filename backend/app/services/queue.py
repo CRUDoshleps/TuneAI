@@ -15,8 +15,9 @@ class QueuePublisher:
         async with connection:
             channel = await connection.channel()
             queue = await declare_answer_queue(channel, self.settings.queue_name)
+            body = {"event_type": routing_key, **payload}
             message = aio_pika.Message(
-                body=json.dumps(payload).encode("utf-8"),
+                body=json.dumps(body).encode("utf-8"),
                 content_type="application/json",
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                 message_id=message_id,
