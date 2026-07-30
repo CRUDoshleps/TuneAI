@@ -51,6 +51,8 @@ export type PlatformConfig = {
   problemDescription: string;
   audienceCards: Array<{ title: string; description: string }>;
   valueProps: Array<{ title: string; description: string }>;
+  legalOwner: string;
+  footerLinks: Array<{ label: string; href: string }>;
   deploymentCommand: string;
   environmentCommand: string;
   enabledModules: string[];
@@ -106,6 +108,13 @@ const officialConfig: PlatformConfig = {
       title: "Self-host под ваш контур",
       description: "Бренд, роли, UI, AI-профили и демонстрационные сценарии настраиваются через окружение."
     }
+  ],
+  legalOwner: "CRUDoshleps",
+  footerLinks: [
+    { label: "GitHub", href: "https://github.com/CRUDoshleps/TuneAI" },
+    { label: "Документация", href: "https://github.com/CRUDoshleps/TuneAI#быстрый-запуск" },
+    { label: "Лицензия MIT", href: "https://github.com/CRUDoshleps/TuneAI/blob/main/LICENSE" },
+    { label: "Консультация", href: "mailto:gsad1030@gmail.com" }
   ],
   deploymentCommand: "git clone https://github.com/CRUDoshleps/TuneAI && cd TuneAI && cp .env.example .env && docker compose up --build -d",
   environmentCommand: "NEXT_PUBLIC_TUNEAI_PRODUCT_NAME, NEXT_PUBLIC_TUNEAI_LOGO_URL, NEXT_PUBLIC_TUNEAI_CONFIG_JSON",
@@ -273,6 +282,13 @@ const unconfiguredConfig: PlatformConfig = {
       description: "Название, логотип, контакты, сценарии и доступы переопределяются через `.env` или JSON-конфиг."
     }
   ],
+  legalOwner: "Self-host owner",
+  footerLinks: [
+    { label: "README", href: officialConfig.docsUrl },
+    { label: "GitHub проекта", href: officialConfig.repositoryUrl },
+    { label: "Лицензия MIT", href: `${officialConfig.repositoryUrl}/blob/main/LICENSE` },
+    { label: "Настроить контакт", href: "mailto:admin@example.com" }
+  ],
   deploymentCommand: "cp .env.example .env && docker compose up --build -d",
   environmentCommand:
     "NEXT_PUBLIC_TUNEAI_TEMPLATE, NEXT_PUBLIC_TUNEAI_PRODUCT_NAME, NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL, NEXT_PUBLIC_TUNEAI_CONFIG_JSON",
@@ -307,6 +323,7 @@ function mergeConfig(base: PlatformConfig, overrides: Partial<PlatformConfig>): 
     roleMatrix: overrides.roleMatrix?.length ? overrides.roleMatrix : base.roleMatrix,
     audienceCards: overrides.audienceCards?.length ? overrides.audienceCards : base.audienceCards,
     valueProps: overrides.valueProps?.length ? overrides.valueProps : base.valueProps,
+    footerLinks: overrides.footerLinks?.length ? overrides.footerLinks : base.footerLinks,
     enabledModules: overrides.enabledModules?.length ? overrides.enabledModules : base.enabledModules,
     permissions: {
       ...base.permissions,

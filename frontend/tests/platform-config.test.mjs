@@ -34,6 +34,8 @@ test("default config presents an unconfigured self-host template", () => {
   assert.equal(config.logoText, "Demo");
   assert.equal(config.consultationEmail, "admin@example.com");
   assert.equal(config.consultationPerson, "Implementation owner");
+  assert.equal(config.legalOwner, "Self-host owner");
+  assert.ok(config.footerLinks.some((link) => link.label === "Лицензия MIT"));
   assert.match(config.problemTitle, /еще не настроена/);
   assert.ok(config.audienceCards.length >= 3);
   assert.ok(config.valueProps.length >= 3);
@@ -46,6 +48,8 @@ test("official template keeps the public TuneAI presentation when enabled explic
   assert.equal(config.productName, "TuneAI");
   assert.equal(config.consultationEmail, "gsad1030@gmail.com");
   assert.equal(config.consultationPerson, "Sadovoi Grigorii");
+  assert.equal(config.legalOwner, "CRUDoshleps");
+  assert.ok(config.footerLinks.some((link) => link.label === "GitHub"));
   assert.match(config.problemTitle, /Устные ответы/);
 });
 

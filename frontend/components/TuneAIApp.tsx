@@ -1097,6 +1097,20 @@ export default function TuneAIApp() {
             </div>
           </section>
 
+          <footer className="site-footer">
+            <div>
+              <strong>{platformConfig.productName}</strong>
+              <span>© {new Date().getFullYear()} {platformConfig.legalOwner}. Все права на self-host данные принадлежат владельцу развертывания.</span>
+            </div>
+            <nav aria-label="Ссылки в подвале">
+              {platformConfig.footerLinks.map((link) => (
+                <a key={`${link.label}-${link.href}`} href={link.href} target="_blank" rel="noreferrer">
+                  {link.label}
+                </a>
+              ))}
+            </nav>
+          </footer>
+
           <div className="brand-wordmark" aria-hidden="true">{platformConfig.productName.toLowerCase()}</div>
         </section>
       </main>

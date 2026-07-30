@@ -68,7 +68,7 @@ button:disabled {
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: 22px;
-  padding: 28px;
+  padding: 28px 28px 116px;
   display: grid;
   grid-template-rows: auto auto auto;
   gap: clamp(24px, 3vw, 42px);
@@ -534,16 +534,18 @@ a.ghost {
 }
 
 .brand-wordmark {
-  position: relative;
+  position: absolute;
+  left: clamp(36px, 8vw, 92px);
+  bottom: 48px;
   z-index: 0;
-  align-self: end;
   color: var(--yellow);
-  font-size: clamp(86px, 20vw, 260px);
+  font-size: clamp(72px, 17vw, 220px);
   font-weight: 900;
-  line-height: 0.72;
+  line-height: 0.74;
   white-space: nowrap;
   pointer-events: none;
   overflow: hidden;
+  opacity: 0.9;
 }
 
 .auth-panel,
@@ -612,19 +614,29 @@ a.ghost {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 10px;
   padding: 0 28px 24px;
 }
 
 .demo-console button,
 .demo-console a {
+  display: flex;
+  align-items: center;
   justify-content: flex-start;
+  gap: 12px;
   min-height: 76px;
   border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
   background: #fffefa;
   color: var(--ink);
   text-decoration: none;
+  text-align: left;
+}
+
+.demo-console svg {
+  flex: 0 0 auto;
 }
 
 .demo-console button span,
@@ -683,6 +695,47 @@ a.ghost {
 .self-host-links a {
   color: #111111;
   font-weight: 900;
+}
+
+.site-footer {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  border-top: 1px solid var(--line);
+  padding: 18px 28px 0;
+  color: var(--muted);
+}
+
+.site-footer > div {
+  display: grid;
+  gap: 4px;
+  max-width: 620px;
+}
+
+.site-footer strong {
+  color: var(--ink);
+}
+
+.site-footer span {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px 14px;
+}
+
+.site-footer a {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
 }
 
 .module-list {
@@ -1781,7 +1834,7 @@ td {
   }
 
   .landing-card {
-    padding: 18px;
+    padding: 18px 18px 96px;
   }
 
   .landing-nav {
@@ -1818,6 +1871,19 @@ td {
 
   .brand-wordmark {
     font-size: clamp(68px, 27vw, 108px);
+    right: 18px;
+    bottom: 38px;
+    left: 18px;
+    overflow: hidden;
+  }
+
+  .site-footer {
+    display: grid;
+    padding: 16px 0 0;
+  }
+
+  .site-footer nav {
+    justify-content: flex-start;
   }
 
   .workspace,
