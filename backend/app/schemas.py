@@ -383,6 +383,37 @@ class MaterialRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MoodleTextSubmissionRequest(BaseModel):
+    external_submission_id: str = Field(min_length=2, max_length=255)
+    external_attempt_id: str | None = Field(default=None, max_length=255)
+    moodle_user_id: str = Field(min_length=1, max_length=255)
+    moodle_course_id: str | None = Field(default=None, max_length=255)
+    moodle_activity_id: str | None = Field(default=None, max_length=255)
+    user_email: EmailStr
+    user_full_name: str = Field(min_length=2, max_length=255)
+    test_id: str
+    question_id: str
+    text: str = Field(min_length=1, max_length=20000)
+
+
+class MoodleSubmissionRead(BaseModel):
+    external_submission_id: str
+    external_attempt_id: str | None = None
+    attempt_id: str
+    answer_id: str
+    answer_status: AnswerStatusEnum
+    result_ready: bool
+    score: float | None = None
+    max_score: float | None = None
+    grade: float | None = None
+    feedback: str | None = None
+    confidence: float | None = None
+    review_required: bool = False
+    review_reason: str | None = None
+    teacher_signal: Literal["none", "review_recommended", "processing_failed"] = "none"
+    transcript: str | None = None
+
+
 class AdminDashboard(BaseModel):
     users: int
     tests: int

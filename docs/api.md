@@ -90,6 +90,16 @@ DELETE /skills/{skill_id}
 
 Endpoints доступны ролям, которые могут создавать тесты. Методист или преподаватель создает скилл, а затем привязывает его к тесту через `criteria.skill_ids`.
 
+## Moodle
+
+```text
+POST /integrations/moodle/submissions/text
+POST /integrations/moodle/submissions/audio
+GET /integrations/moodle/submissions/{external_submission_id}/result
+```
+
+Endpoints защищены `X-TuneAI-Integration-Key` и используются Moodle-плагином для отправки текстовых или голосовых ответов, получения оценки и сигнала преподавателю `teacher_signal`.
+
 ## Demo Bootstrap
 
 ```text

@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     demo_bootstrap_enabled: bool = True
     demo_bootstrap_limit_per_hour: int = 30
     demo_bootstrap_ttl_hours: int = 24
+    moodle_integration_enabled: bool = False
+    moodle_integration_token: str | None = None
 
     database_url: str = "sqlite:///./tuneai.db"
 

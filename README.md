@@ -162,7 +162,7 @@ YANDEX_FOLDER_ID=<folder-id>
 YANDEX_API_KEY=<api-key>
 ```
 
-Ключ используется только backend и worker. В браузер он не передается. После входа администратора ключи и модели можно переключать через админку без пересборки: см. [docs/ai-providers.md](docs/ai-providers.md). Методисты могут настраивать поведение проверки через AI-скиллы: см. [docs/ai-skills.md](docs/ai-skills.md).
+Ключ используется только backend и worker. В браузер он не передается. После входа администратора ключи и модели можно переключать через админку без пересборки: см. [docs/ai-providers.md](docs/ai-providers.md). Методисты могут настраивать поведение проверки через AI-скиллы: см. [docs/ai-skills.md](docs/ai-skills.md). Для подключения Moodle используйте service API из [docs/moodle.md](docs/moodle.md).
 
 ## Архитектура
 

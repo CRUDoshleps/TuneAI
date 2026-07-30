@@ -190,6 +190,24 @@ class Attempt(Base):
     answers: Mapped[list["Answer"]] = relationship(back_populates="attempt", cascade="all, delete-orphan")
 
 
+class MoodleSubmission(Base):
+    __tablename__ = "moodle_submissions"
+    __table_args__ = (UniqueConstraint("external_submission_id", name="uq_moodle_external_submission_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    external_submission_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    external_attempt_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    moodle_user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    moodle_course_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    moodle_activity_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False)
+    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    attempt_id: Mapped[str] = mapped_column(ForeignKey("attempts.id"), nullable=False)
+    answer_id: Mapped[str] = mapped_column(ForeignKey("answers.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class Answer(Base):
     __tablename__ = "answers"
     __table_args__ = (UniqueConstraint("attempt_id", "question_id", name="uq_answer_attempt_question"),)
