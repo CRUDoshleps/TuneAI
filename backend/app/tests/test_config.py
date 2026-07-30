@@ -26,3 +26,11 @@ def test_cors_origins_accept_csv_from_environment(monkeypatch):
     settings = Settings(_env_file=None)
 
     assert settings.normalized_cors_origins == ["http://localhost:3000", "https://exam.example.edu"]
+
+
+def test_permission_roles_accept_csv_and_json_values():
+    csv_settings = Settings(test_creator_roles="teacher,admin")
+    json_settings = Settings(answer_reviewer_roles='["teacher","interviewer"]')
+
+    assert csv_settings.test_creator_roles == ["teacher", "admin"]
+    assert json_settings.answer_reviewer_roles == ["teacher", "interviewer"]

@@ -3,7 +3,7 @@
 
   <h1>TuneAI</h1>
 
-  <p><strong>Платформа устного тестирования с распознаванием речи, RAG и оценкой ответов через Yandex AI Studio.</strong></p>
+  <p><strong>Open-source движок устных тестов, подготовки, RAG-проверки и AI-оценивания ответов.</strong></p>
 
   <p>
     <img alt="Next.js" src="https://img.shields.io/badge/Next.js-000000?style=flat-square&logo=nextdotjs&logoColor=white" />
@@ -26,6 +26,8 @@
 ---
 
 > Обычные тесты проверяют выбор правильного варианта. TuneAI проверяет устный ответ: как человек формулирует мысль, насколько полно раскрывает тему, где ошибается и какие материалы стоит повторить.
+
+Главная страница в репозитории - это демонстрация возможностей open-source системы. Ее задача - показать действия, которые администратор, методист, преподаватель или студент смогут повторить после self-host развертывания: создать тест, настроить вопросы, загрузить RAG-материалы, выбрать AI-проверяющего агента и пройти демо-попытку.
 
 ## Возможности
 
@@ -81,6 +83,46 @@ student@tuneai.dev / password123
 admin@tuneai.dev / password123
 ```
 
+## Self-host настройка
+
+TuneAI можно развернуть под собственный бренд, учебный процесс и набор ролей без изменения исходного кода. Основные настройки находятся в `.env` и передаются frontend на этапе сборки Docker-образа.
+
+```env
+NEXT_PUBLIC_TUNEAI_PRODUCT_NAME=My Oral Exams
+NEXT_PUBLIC_TUNEAI_LOGO_TEXT=MOE
+NEXT_PUBLIC_TUNEAI_LOGO_URL=https://example.com/logo.png
+NEXT_PUBLIC_TUNEAI_REPOSITORY_URL=https://github.com/my-org/my-tuneai
+NEXT_PUBLIC_TUNEAI_DOCS_URL=https://docs.example.com/tuneai
+TEST_CREATOR_ROLES=teacher,interviewer,admin
+ANSWER_REVIEWER_ROLES=teacher,admin
+```
+
+Для глубокой настройки главной демо-страницы используйте `NEXT_PUBLIC_TUNEAI_CONFIG_JSON`. Через него можно переопределить:
+
+- бренд и ссылки;
+- сценарии на главной странице;
+- demo actions;
+- self-host команды;
+- список включенных модулей;
+- матрицу ролей;
+- видимость frontend-разделов по ролям;
+- pipeline шагов.
+
+Минимальный пример:
+
+```env
+NEXT_PUBLIC_TUNEAI_CONFIG_JSON='{"productName":"Campus Oral AI","logoText":"CampusAI","enabledModules":["Экзамены","RAG","Карта компетенций"],"permissions":{"testCreatorRoles":["teacher","interviewer","admin"],"answerReviewerRoles":["teacher","admin"]},"demoActions":[{"id":"builder","title":"Собрать экзамен","description":"Открыть конструктор","flow":"builder"},{"id":"take","title":"Пройти пробу","description":"Запустить демо-попытку","flow":"take"}]}'
+```
+
+После изменения публичных frontend-переменных пересоберите образ:
+
+```bash
+docker compose build frontend
+docker compose up -d
+```
+
+Backend-настройки остаются в `.env`: база данных, RabbitMQ, S3/MinIO, Yandex AI Studio, CORS, лимиты загрузки и режим mock/real AI.
+
 ## Yandex AI Studio
 
 По умолчанию проект запускается в mock-режиме. Чтобы включить реальные модели Яндекса, заполните `.env`:
@@ -120,4 +162,4 @@ npm run build
 
 ## Лицензия
 
-Исходный код доступен для ознакомления в рамках демонстрации проекта. Все права принадлежат CRUDoshleps. Подробнее см. [LICENSE](LICENSE).
+Проект распространяется под MIT License. Подробнее см. [LICENSE](LICENSE).

@@ -89,6 +89,18 @@ button:disabled {
   font-size: 30px;
   font-weight: 900;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-image {
+  width: 34px;
+  height: 34px;
+  display: inline-block;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
 .landing-nav nav {
@@ -169,6 +181,12 @@ button:disabled {
   color: var(--red);
   border-color: #f1b6aa;
   background: #fff5f2;
+}
+
+a.primary,
+a.secondary,
+a.ghost {
+  text-decoration: none;
 }
 
 .ghost {
@@ -325,15 +343,18 @@ button:disabled {
   padding: 0 28px 24px;
 }
 
-.demo-console button {
+.demo-console button,
+.demo-console a {
   justify-content: flex-start;
   min-height: 76px;
   border: 1px solid var(--line);
   background: #fffefa;
   color: var(--ink);
+  text-decoration: none;
 }
 
-.demo-console button span {
+.demo-console button span,
+.demo-console a span {
   display: grid;
   gap: 3px;
   text-align: left;
@@ -342,6 +363,68 @@ button:disabled {
 .demo-console small {
   color: var(--muted);
   font-size: 12px;
+}
+
+.self-host-panel {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: -16px 28px 0;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.self-host-panel p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.self-host-panel code {
+  display: block;
+  overflow-x: auto;
+  border-radius: 8px;
+  padding: 12px;
+  background: #111111;
+  color: #fff7cf;
+  white-space: nowrap;
+}
+
+.self-host-panel small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.self-host-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.self-host-links a {
+  color: #111111;
+  font-weight: 900;
+}
+
+.module-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.module-list span {
+  border: 1px solid #d1b843;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--yellow-soft);
+  color: #5d4b00;
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .tabs {

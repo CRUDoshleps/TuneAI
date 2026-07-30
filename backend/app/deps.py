@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models import RoleEnum, User
@@ -37,8 +38,30 @@ def require_roles(*roles: RoleEnum) -> Callable[[User], User]:
     return dependency
 
 
+def _configured_roles(role_names: list[str], fallback: set[RoleEnum]) -> set[RoleEnum]:
+    roles: set[RoleEnum] = {RoleEnum.admin}
+    for role_name in role_names:
+        try:
+            roles.add(RoleEnum(role_name.strip()))
+        except ValueError:
+            continue
+    return roles or fallback
+
+
 def can_create_tests(user: User) -> bool:
-    return user.role in {RoleEnum.student, RoleEnum.teacher, RoleEnum.interviewer, RoleEnum.admin}
+    roles = _configured_roles(
+        get_settings().test_creator_roles,
+        {RoleEnum.student, RoleEnum.teacher, RoleEnum.interviewer, RoleEnum.admin},
+    )
+    return user.role in roles
+
+
+def can_review_answers(user: User) -> bool:
+    roles = _configured_roles(
+        get_settings().answer_reviewer_roles,
+        {RoleEnum.teacher, RoleEnum.interviewer, RoleEnum.admin},
+    )
+    return user.role in roles
 
 
 def is_admin(user: User) -> bool:

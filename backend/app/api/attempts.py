@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.deps import get_current_user, require_roles
+from app.deps import can_review_answers, get_current_user
 from app.metrics import ANSWERS_CREATED
 from app.models import (
     Answer,
@@ -74,8 +74,10 @@ def list_my_attempts(
 @router.get("/review-queue", response_model=list[ReviewQueueItem])
 def review_queue(
     db: Session = Depends(get_db),
-    reviewer: User = Depends(require_roles(RoleEnum.admin, RoleEnum.teacher, RoleEnum.interviewer)),
+    reviewer: User = Depends(get_current_user),
 ) -> list[ReviewQueueItem]:
+    if not can_review_answers(reviewer):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
     answers = list(
         db.scalars(
             select(Answer)
@@ -188,8 +190,10 @@ def review_answer(
     answer_id: str,
     payload: AnswerReviewRequest,
     db: Session = Depends(get_db),
-    reviewer: User = Depends(require_roles(RoleEnum.admin, RoleEnum.teacher, RoleEnum.interviewer)),
+    reviewer: User = Depends(get_current_user),
 ) -> AnswerRead:
+    if not can_review_answers(reviewer):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
     answer = db.scalar(
         select(Answer)
         .where(Answer.id == answer_id, Answer.attempt_id == attempt_id)

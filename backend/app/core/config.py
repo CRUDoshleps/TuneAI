@@ -41,6 +41,8 @@ class Settings(BaseSettings):
         "audio/wav",
         "audio/x-wav",
     ]
+    test_creator_roles: Annotated[list[str], NoDecode] = ["student", "teacher", "interviewer", "admin"]
+    answer_reviewer_roles: Annotated[list[str], NoDecode] = ["teacher", "interviewer", "admin"]
 
     storage_backend: Literal["local", "s3"] = "local"
     s3_endpoint_url: str | None = None
@@ -67,7 +69,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    @field_validator("cors_origins", "allowed_audio_types", mode="before")
+    @field_validator("cors_origins", "allowed_audio_types", "test_creator_roles", "answer_reviewer_roles", mode="before")
     @classmethod
     def split_csv_or_json(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):

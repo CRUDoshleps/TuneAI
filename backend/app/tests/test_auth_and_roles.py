@@ -53,6 +53,25 @@ def test_student_can_create_only_self_training_tests(client):
     assert allowed.json()["questions"][0]["text"] == "Explain retries?"
 
 
+def test_self_host_config_can_disable_student_test_creation(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "test_creator_roles", ["teacher", "admin"])
+    register_and_login(client, "admin@example.com")
+    student_token = register_and_login(client, "student@example.com")
+
+    response = client.post(
+        "/tests",
+        headers=auth_header(student_token),
+        json={
+            "title": "No longer allowed",
+            "test_type": "self_training",
+            "questions": [{"text": "Explain retries?", "max_score": 10}],
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Only self-training users and staff users can create tests"
+
+
 def test_examinee_cannot_create_tests(client):
     admin_token = register_and_login(client, "admin@example.com")
     created = client.post(
@@ -78,6 +97,17 @@ def test_examinee_cannot_create_tests(client):
         },
     )
     assert response.status_code == 403
+
+
+def test_self_host_config_can_add_student_review_permission(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "answer_reviewer_roles", ["student"])
+    register_and_login(client, "admin@example.com")
+    student_token = register_and_login(client, "student@example.com")
+
+    response = client.get("/attempts/review-queue", headers=auth_header(student_token))
+
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_admin_can_ban_and_unban_user_but_not_self(client):

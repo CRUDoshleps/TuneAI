@@ -14,6 +14,8 @@ x-backend-environment: &backend-environment
   STORAGE_BACKEND: local
   UPLOAD_DIR: /data/uploads
   MAX_UPLOAD_MB: "50"
+  TEST_CREATOR_ROLES: ${TEST_CREATOR_ROLES:-student,teacher,interviewer,admin}
+  ANSWER_REVIEWER_ROLES: ${ANSWER_REVIEWER_ROLES:-teacher,interviewer,admin}
 
 x-backend-secrets: &backend-secrets
   - secret_key
@@ -124,6 +126,13 @@ services:
   frontend:
     <<: *security
     image: ${REGISTRY_IMAGE:?REGISTRY_IMAGE is required}/frontend:${IMAGE_TAG:?IMAGE_TAG is required}
+    environment:
+      NEXT_PUBLIC_TUNEAI_PRODUCT_NAME: ${NEXT_PUBLIC_TUNEAI_PRODUCT_NAME:-TuneAI}
+      NEXT_PUBLIC_TUNEAI_LOGO_TEXT: ${NEXT_PUBLIC_TUNEAI_LOGO_TEXT:-TuneAI}
+      NEXT_PUBLIC_TUNEAI_LOGO_URL: ${NEXT_PUBLIC_TUNEAI_LOGO_URL:-}
+      NEXT_PUBLIC_TUNEAI_REPOSITORY_URL: ${NEXT_PUBLIC_TUNEAI_REPOSITORY_URL:-https://github.com/CRUDoshleps/TuneAI}
+      NEXT_PUBLIC_TUNEAI_DOCS_URL: ${NEXT_PUBLIC_TUNEAI_DOCS_URL:-https://github.com/CRUDoshleps/TuneAI}
+      NEXT_PUBLIC_TUNEAI_CONFIG_JSON: ${NEXT_PUBLIC_TUNEAI_CONFIG_JSON:-}
     tmpfs:
       - /tmp:size=32m,mode=1777
     networks:
