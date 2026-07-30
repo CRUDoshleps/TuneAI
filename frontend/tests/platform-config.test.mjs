@@ -26,15 +26,27 @@ function loadPlatformConfig(env = {}) {
   return cjsModule.exports.platformConfig;
 }
 
-test("default config presents TuneAI as a public project with consultation contact", () => {
+test("default config presents an unconfigured self-host template", () => {
   const config = loadPlatformConfig();
 
+  assert.equal(config.template, "unconfigured");
+  assert.equal(config.productName, "Self-host Test Platform");
+  assert.equal(config.logoText, "Demo");
+  assert.equal(config.consultationEmail, "admin@example.com");
+  assert.equal(config.consultationPerson, "Implementation owner");
+  assert.match(config.problemTitle, /еще не настроена/);
+  assert.ok(config.audienceCards.length >= 3);
+  assert.ok(config.valueProps.length >= 3);
+});
+
+test("official template keeps the public TuneAI presentation when enabled explicitly", () => {
+  const config = loadPlatformConfig({ NEXT_PUBLIC_TUNEAI_TEMPLATE: "official" });
+
+  assert.equal(config.template, "official");
   assert.equal(config.productName, "TuneAI");
   assert.equal(config.consultationEmail, "gsad1030@gmail.com");
   assert.equal(config.consultationPerson, "Sadovoi Grigorii");
   assert.match(config.problemTitle, /Устные ответы/);
-  assert.ok(config.audienceCards.length >= 3);
-  assert.ok(config.valueProps.length >= 3);
 });
 
 test("default config includes full demo scenarios for preparation exam and interview", () => {
@@ -49,6 +61,7 @@ test("default config includes full demo scenarios for preparation exam and inter
 
 test("json and env overrides customize demo page and consultation settings", () => {
   const config = loadPlatformConfig({
+    NEXT_PUBLIC_TUNEAI_TEMPLATE: "official",
     NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL: "help@example.com",
     NEXT_PUBLIC_TUNEAI_CONFIG_JSON: JSON.stringify({
       productName: "CampusAI",

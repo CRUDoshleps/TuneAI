@@ -1,6 +1,7 @@
 export type DemoFlow = "builder" | "materials" | "take";
 export type PlatformRole = "student" | "examinee" | "candidate" | "teacher" | "interviewer" | "admin";
 export type PublicView = "home" | "demo";
+export type PlatformTemplate = "unconfigured" | "official";
 
 export type LandingScenarioConfig = {
   id: string;
@@ -36,6 +37,7 @@ export type DemoScenarioConfig = {
 };
 
 export type PlatformConfig = {
+  template: PlatformTemplate;
   productName: string;
   logoText: string;
   logoUrl?: string;
@@ -63,7 +65,8 @@ export type PlatformConfig = {
   };
 };
 
-const defaultConfig: PlatformConfig = {
+const officialConfig: PlatformConfig = {
+  template: "official",
   productName: "TuneAI",
   logoText: "TuneAI",
   repositoryUrl: "https://github.com/CRUDoshleps/TuneAI",
@@ -229,6 +232,70 @@ const defaultConfig: PlatformConfig = {
   }
 };
 
+const unconfiguredConfig: PlatformConfig = {
+  ...officialConfig,
+  template: "unconfigured",
+  productName: "Self-host Test Platform",
+  logoText: "Demo",
+  consultationEmail: "admin@example.com",
+  consultationPerson: "Implementation owner",
+  headline: "Ненастроенный self-host шаблон устных тестов.",
+  subheadline:
+    "Это локальная демо-сборка после клонирования. Задайте бренд, почту, роли, сценарии и материалы в `.env`, чтобы превратить шаблон в свою систему.",
+  problemTitle: "Система поднялась локально, но еще не настроена под вашу организацию.",
+  problemDescription:
+    "Перед вами нейтральный шаблон TuneAI: он показывает возможности платформы, но не является официальным сайтом проекта и не содержит финального брендинга владельца.",
+  audienceCards: [
+    {
+      title: "Настройте аудиторию",
+      description: "Опишите, для кого ваш контур: школа, вуз, корпоративное обучение, HR или отдельный курс."
+    },
+    {
+      title: "Задайте методику",
+      description: "Поменяйте демо-сценарии, вопросы, критерии, компетенции и RAG-материалы под свой процесс."
+    },
+    {
+      title: "Подключите владельца",
+      description: "Укажите рабочую почту, имя ответственного и внутренние инструкции по внедрению."
+    }
+  ],
+  valueProps: [
+    {
+      title: "Шаблон уже работает",
+      description: "Можно пройти демо, создать тест, загрузить материал и проверить полный цикл без внешних сервисов."
+    },
+    {
+      title: "Данные не привязаны к нам",
+      description: "Локальный запуск использует ваши env-настройки, роли и seed-данные в вашей инфраструктуре."
+    },
+    {
+      title: "Бренд меняется без кода",
+      description: "Название, логотип, контакты, сценарии и доступы переопределяются через `.env` или JSON-конфиг."
+    }
+  ],
+  deploymentCommand: "cp .env.example .env && docker compose up --build -d",
+  environmentCommand:
+    "NEXT_PUBLIC_TUNEAI_TEMPLATE, NEXT_PUBLIC_TUNEAI_PRODUCT_NAME, NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL, NEXT_PUBLIC_TUNEAI_CONFIG_JSON",
+  scenarios: [
+    {
+      id: "setup",
+      label: "Настройка",
+      eyebrow: "Self-host шаблон",
+      title: "Вы подняли нейтральную демо-систему.",
+      description:
+        "Замените placeholder-бренд, консультационную почту, роли, сценарии и тексты в env перед показом пользователям.",
+      action: "Открыть демо"
+    },
+    ...officialConfig.scenarios.slice(1)
+  ],
+  demoActions: [
+    { id: "builder", title: "Проверить конструктор", description: "Создать временный тест", flow: "builder" },
+    { id: "materials", title: "Проверить RAG", description: "Привязать материал к вопросу", flow: "materials" },
+    { id: "take", title: "Пройти демо", description: "Запустить попытку", flow: "take" },
+    { id: "docs", title: "Настроить шаблон", description: "Открыть README и env-настройки", href: officialConfig.docsUrl }
+  ]
+};
+
 function mergeConfig(base: PlatformConfig, overrides: Partial<PlatformConfig>): PlatformConfig {
   return {
     ...base,
@@ -267,20 +334,25 @@ function parseJsonConfig(): Partial<PlatformConfig> {
 }
 
 const jsonConfig = parseJsonConfig();
+const requestedTemplate = process.env.NEXT_PUBLIC_TUNEAI_TEMPLATE || jsonConfig.template;
+const selectedTemplate: PlatformTemplate =
+  requestedTemplate === "official" ? "official" : "unconfigured";
+const selectedConfig = selectedTemplate === "official" ? officialConfig : unconfiguredConfig;
 
-export const platformConfig = mergeConfig(defaultConfig, {
+export const platformConfig = mergeConfig(selectedConfig, {
   ...jsonConfig,
-  productName: process.env.NEXT_PUBLIC_TUNEAI_PRODUCT_NAME || jsonConfig.productName || defaultConfig.productName,
-  logoText: process.env.NEXT_PUBLIC_TUNEAI_LOGO_TEXT || jsonConfig.logoText || defaultConfig.logoText,
+  template: selectedTemplate,
+  productName: process.env.NEXT_PUBLIC_TUNEAI_PRODUCT_NAME || jsonConfig.productName || selectedConfig.productName,
+  logoText: process.env.NEXT_PUBLIC_TUNEAI_LOGO_TEXT || jsonConfig.logoText || selectedConfig.logoText,
   logoUrl: process.env.NEXT_PUBLIC_TUNEAI_LOGO_URL || jsonConfig.logoUrl,
-  repositoryUrl: process.env.NEXT_PUBLIC_TUNEAI_REPOSITORY_URL || jsonConfig.repositoryUrl || defaultConfig.repositoryUrl,
-  docsUrl: process.env.NEXT_PUBLIC_TUNEAI_DOCS_URL || jsonConfig.docsUrl || defaultConfig.docsUrl,
+  repositoryUrl: process.env.NEXT_PUBLIC_TUNEAI_REPOSITORY_URL || jsonConfig.repositoryUrl || selectedConfig.repositoryUrl,
+  docsUrl: process.env.NEXT_PUBLIC_TUNEAI_DOCS_URL || jsonConfig.docsUrl || selectedConfig.docsUrl,
   consultationEmail:
     process.env.NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL ||
     jsonConfig.consultationEmail ||
-    defaultConfig.consultationEmail,
+    selectedConfig.consultationEmail,
   consultationPerson:
     process.env.NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON ||
     jsonConfig.consultationPerson ||
-    defaultConfig.consultationPerson
+    selectedConfig.consultationPerson
 });

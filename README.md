@@ -91,7 +91,10 @@ admin@tuneai.dev / password123
 
 TuneAI можно развернуть под собственный бренд, учебный процесс и набор ролей без изменения исходного кода. Основные настройки находятся в `.env` и передаются frontend на этапе сборки Docker-образа.
 
+После клонирования `.env.example` включает `NEXT_PUBLIC_TUNEAI_TEMPLATE=unconfigured`. Поэтому локально поднимается нейтральный ненастроенный демо-шаблон, а не официальный сайт проекта. Он специально показывает placeholder-бренд, placeholder-почту и подсказки, что владельцу инстанса нужно настроить систему под себя.
+
 ```env
+NEXT_PUBLIC_TUNEAI_TEMPLATE=unconfigured
 NEXT_PUBLIC_TUNEAI_PRODUCT_NAME=My Oral Exams
 NEXT_PUBLIC_TUNEAI_LOGO_TEXT=MOE
 NEXT_PUBLIC_TUNEAI_LOGO_URL=https://example.com/logo.png
@@ -101,6 +104,12 @@ NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL=help@example.com
 NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON=Implementation Team
 TEST_CREATOR_ROLES=teacher,interviewer,admin
 ANSWER_REVIEWER_ROLES=teacher,admin
+```
+
+Для официальной презентационной сборки TuneAI можно явно поставить:
+
+```env
+NEXT_PUBLIC_TUNEAI_TEMPLATE=official
 ```
 
 Для глубокой настройки главной демо-страницы используйте `NEXT_PUBLIC_TUNEAI_CONFIG_JSON`. Через него можно переопределить:
@@ -119,7 +128,7 @@ ANSWER_REVIEWER_ROLES=teacher,admin
 Минимальный пример:
 
 ```env
-NEXT_PUBLIC_TUNEAI_CONFIG_JSON='{"productName":"Campus Oral AI","logoText":"CampusAI","consultationEmail":"help@example.com","enabledModules":["Экзамены","RAG","Карта компетенций"],"permissions":{"testCreatorRoles":["teacher","interviewer","admin"],"answerReviewerRoles":["teacher","admin"]},"demoActions":[{"id":"builder","title":"Собрать экзамен","description":"Открыть конструктор","flow":"builder"},{"id":"take","title":"Пройти пробу","description":"Запустить демо-попытку","flow":"take"}]}'
+NEXT_PUBLIC_TUNEAI_CONFIG_JSON='{"template":"unconfigured","productName":"Campus Oral AI","logoText":"CampusAI","consultationEmail":"help@example.com","enabledModules":["Экзамены","RAG","Карта компетенций"],"permissions":{"testCreatorRoles":["teacher","interviewer","admin"],"answerReviewerRoles":["teacher","admin"]},"demoActions":[{"id":"builder","title":"Собрать экзамен","description":"Открыть конструктор","flow":"builder"},{"id":"take","title":"Пройти пробу","description":"Запустить демо-попытку","flow":"take"}]}'
 ```
 
 После изменения публичных frontend-переменных пересоберите образ:
