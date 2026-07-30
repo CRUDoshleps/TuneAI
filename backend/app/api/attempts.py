@@ -126,6 +126,17 @@ def get_attempt(
     return _serialize_attempt(db, attempt, user)
 
 
+@router.get("/{attempt_id}/result", response_model=AttemptRead)
+def get_attempt_result(
+    attempt_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AttemptRead:
+    attempt = _load_attempt(db, attempt_id)
+    _ensure_attempt_access(attempt, user)
+    return _serialize_attempt(db, attempt, user)
+
+
 @router.post("/{attempt_id}/questions/{question_id}/audio", response_model=AttemptRead, status_code=status.HTTP_201_CREATED)
 async def upload_answer_audio(
     attempt_id: str,

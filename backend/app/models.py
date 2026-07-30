@@ -181,6 +181,7 @@ class Material(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False)
+    question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), nullable=True)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     source_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

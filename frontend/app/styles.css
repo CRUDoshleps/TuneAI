@@ -316,6 +316,34 @@ button:disabled {
   color: var(--muted);
 }
 
+.demo-console {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 0 28px 24px;
+}
+
+.demo-console button {
+  justify-content: flex-start;
+  min-height: 76px;
+  border: 1px solid var(--line);
+  background: #fffefa;
+  color: var(--ink);
+}
+
+.demo-console button span {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
+
+.demo-console small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -909,7 +937,7 @@ textarea {
 
 .material-form {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(180px, 260px) 1fr auto;
+  grid-template-columns: minmax(160px, 220px) minmax(180px, 260px) minmax(180px, 240px) 1fr auto;
   gap: 10px;
   align-items: start;
 }
@@ -929,6 +957,14 @@ textarea {
   background: var(--yellow-soft);
   font-size: 13px;
   font-weight: 850;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.material-list small {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .review-workspace,
@@ -1064,6 +1100,10 @@ textarea {
   align-items: start;
 }
 
+.settings-form.mini {
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+}
+
 .question-form {
   margin-top: 14px;
   grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
@@ -1097,6 +1137,58 @@ textarea {
 
 .questions-manage {
   margin-top: 20px;
+}
+
+.competency-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.competency-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffefa;
+}
+
+.competency-row small,
+.competency-row p {
+  color: var(--muted);
+}
+
+.competency-row p,
+.competency-row progress {
+  grid-column: 1 / -1;
+}
+
+.competency-row progress {
+  width: 100%;
+  height: 10px;
+}
+
+.role-matrix {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.role-matrix div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 5px;
+  background: #fffefa;
+}
+
+.role-matrix span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .empty-state {
@@ -1264,6 +1356,8 @@ td {
   .admin-sections,
   .material-form,
   .review-form,
+  .demo-console,
+  .role-matrix,
   .ai-pipeline {
     grid-template-columns: 1fr;
   }

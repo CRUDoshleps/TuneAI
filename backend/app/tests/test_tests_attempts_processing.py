@@ -343,6 +343,71 @@ def test_admin_can_delete_material_and_empty_test(client):
     assert missing.status_code == 404
 
 
+def test_materials_can_be_bound_to_specific_question_and_attempt_result_api(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    test = create_two_question_test(client, admin_token)
+    first_question_id = test["questions"][0]["id"]
+    second_question_id = test["questions"][1]["id"]
+
+    general_material = client.post(
+        "/materials",
+        headers=auth_header(admin_token),
+        json={
+            "test_id": test["id"],
+            "title": "General notes",
+            "content": "General notes that apply to the whole oral scenario and every answer.",
+        },
+    )
+    assert general_material.status_code == 201, general_material.text
+    scoped_material = client.post(
+        "/materials",
+        headers=auth_header(admin_token),
+        json={
+            "test_id": test["id"],
+            "question_id": first_question_id,
+            "title": "First question notes",
+            "content": "Specific notes for the first question only and its grading context.",
+        },
+    )
+    assert scoped_material.status_code == 201, scoped_material.text
+    assert scoped_material.json()["question_id"] == first_question_id
+
+    all_materials = client.get(f"/materials?test_id={test['id']}", headers=auth_header(admin_token))
+    assert all_materials.status_code == 200
+    assert {item["title"] for item in all_materials.json()} == {"General notes", "First question notes"}
+
+    filtered_materials = client.get(
+        f"/materials?test_id={test['id']}&question_id={first_question_id}",
+        headers=auth_header(admin_token),
+    )
+    assert filtered_materials.status_code == 200
+    assert [item["title"] for item in filtered_materials.json()] == ["First question notes"]
+
+    invalid_material = client.post(
+        "/materials",
+        headers=auth_header(admin_token),
+        json={
+            "test_id": test["id"],
+            "question_id": "missing-question",
+            "title": "Wrong scope",
+            "content": "This content should not be accepted because the question is missing.",
+        },
+    )
+    assert invalid_material.status_code == 404
+    assert invalid_material.json()["detail"] == "Question not found in this test"
+
+    attempt_response = client.post(
+        "/attempts",
+        headers=auth_header(admin_token),
+        json={"test_id": test["id"]},
+    )
+    assert attempt_response.status_code == 201, attempt_response.text
+    result = client.get(f"/attempts/{attempt_response.json()['id']}/result", headers=auth_header(admin_token))
+    assert result.status_code == 200
+    assert result.json()["id"] == attempt_response.json()["id"]
+    assert [question["id"] for question in result.json()["questions"]] == [first_question_id, second_question_id]
+
+
 def test_examinee_sees_only_assigned_exam_and_no_public_self_training(client):
     admin_token = register_and_login(client, "admin@example.com")
     self_training = create_two_question_test(client, admin_token)

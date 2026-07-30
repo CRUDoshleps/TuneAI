@@ -202,6 +202,7 @@ class ReviewQueueItem(BaseModel):
 
 class MaterialCreate(BaseModel):
     test_id: str
+    question_id: str | None = None
     title: str = Field(min_length=3, max_length=255)
     content: str = Field(min_length=20)
 
@@ -209,6 +210,7 @@ class MaterialCreate(BaseModel):
 class MaterialRead(BaseModel):
     id: str
     test_id: str
+    question_id: str | None = None
     title: str
     source_filename: str | None = None
     created_at: datetime

@@ -121,6 +121,7 @@ export type Attempt = {
 export type Material = {
   id: string;
   test_id: string;
+  question_id: string | null;
   title: string;
   source_filename: string | null;
   created_at: string;

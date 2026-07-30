@@ -81,6 +81,66 @@ const ANSWER_STATUS_LABELS: Record<Answer["status"], string> = {
   failed: "Не удалось обработать"
 };
 
+const DEFAULT_RUBRIC = "Оценить корректность, полноту, аргументацию и опору на материалы.";
+const DEFAULT_AGENT = "rubric-rag-reviewer";
+
+function getCriteriaString(test: Test | null, key: string, fallback = "") {
+  const value = test?.criteria?.[key];
+  return typeof value === "string" ? value : fallback;
+}
+
+function getCriteriaNumber(test: Test | null, key: string, fallback: number) {
+  const value = test?.criteria?.[key];
+  return typeof value === "number" ? value : fallback;
+}
+
+function buildCriteriaFromForm(form: FormData) {
+  return {
+    rubric: String(form.get("rubric") || DEFAULT_RUBRIC),
+    competencies: String(form.get("competencies") || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+    scenario: String(form.get("scenario") || form.get("test_type") || "exam"),
+    agent_profile: String(form.get("agent_profile") || DEFAULT_AGENT),
+    review_confidence_threshold: Number(form.get("review_confidence_threshold") || 0.78),
+    strictness: String(form.get("strictness") || "balanced"),
+    material_policy: String(form.get("material_policy") || "test_and_question")
+  };
+}
+
+function buildCompetencyMap(attempts: Attempt[], tests: Test[]) {
+  const testById = new Map(tests.map((test) => [test.id, test]));
+  const stats = new Map<string, { score: number; maxScore: number; completed: number; recommendations: string[] }>();
+  for (const attempt of attempts) {
+    const test = testById.get(attempt.test_id);
+    const competencies = Array.isArray(test?.criteria?.competencies)
+      ? (test.criteria.competencies as unknown[]).filter((item): item is string => typeof item === "string")
+      : [test?.title || "Общие навыки"];
+    const score = attempt.total_score ?? attempt.answers.reduce((sum, answer) => sum + (answer.review_score ?? answer.score ?? 0), 0);
+    const maxScore = attempt.max_score ?? attempt.answers.reduce((sum, answer) => sum + (answer.max_score ?? 0), 0);
+    for (const competency of competencies.length ? competencies : ["Общие навыки"]) {
+      const row = stats.get(competency) || { score: 0, maxScore: 0, completed: 0, recommendations: [] };
+      row.score += score;
+      row.maxScore += maxScore;
+      row.completed += attempt.status === "completed" ? 1 : 0;
+      for (const answer of attempt.answers) {
+        const recommendation = answer.evaluation?.recommendations;
+        if (recommendation && row.recommendations.length < 2) {
+          row.recommendations.push(recommendation);
+        }
+      }
+      stats.set(competency, row);
+    }
+  }
+  return [...stats.entries()].map(([name, row]) => ({
+    name,
+    percent: row.maxScore ? Math.round((row.score / row.maxScore) * 100) : 0,
+    completed: row.completed,
+    recommendation: row.recommendations[0] || "Пройти еще одну попытку, чтобы накопить точную рекомендацию."
+  }));
+}
+
 function formatProcessingError(message?: string | null) {
   if (!message) {
     return "Не удалось обработать запись. Попробуйте отправить ответ еще раз.";
@@ -323,6 +383,94 @@ export default function TuneAIApp() {
     }
   }
 
+  async function startDemoFlow(flow: "builder" | "materials" | "take") {
+    setError("");
+    const stamp = Date.now();
+    const demoUser = {
+      email: `demo-${flow}-${stamp}@tuneai.local`,
+      password: "password123",
+      full_name: flow === "take" ? "Демо студент" : "Демо автор"
+    };
+    try {
+      await apiFetch<User>("/auth/register", { method: "POST", body: JSON.stringify(demoUser) });
+      const pair = await apiFetch<TokenPair>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: demoUser.email, password: demoUser.password })
+      });
+      saveAuth(pair);
+      const demoTest = await apiFetch<Test>(
+        "/tests",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Демо: устный ответ по RAG",
+            description: "Небольшой сценарий для проверки конструктора, материалов и прохождения.",
+            test_type: "self_training",
+            criteria: {
+              rubric: DEFAULT_RUBRIC,
+              competencies: ["RAG", "Аргументация", "Устный ответ"],
+              scenario: "self_training",
+              agent_profile: flow === "take" ? "self-training-mentor" : DEFAULT_AGENT,
+              review_confidence_threshold: 0.78,
+              strictness: "balanced",
+              material_policy: "test_and_question"
+            },
+            questions: [
+              {
+                text: "Объясните, зачем RAG помогает проверять устные ответы.",
+                expected_answer: "Ответ должен связать расшифровку, материалы курса, поиск контекста и прозрачную обратную связь.",
+                order_index: 0,
+                max_score: 10
+              }
+            ]
+          })
+        },
+        pair.access_token
+      );
+      const published = await apiFetch<Test>(
+        `/tests/${demoTest.id}`,
+        { method: "PATCH", body: JSON.stringify({ status: "published" }) },
+        pair.access_token
+      );
+      await apiFetch<Material>(
+        "/materials",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            test_id: published.id,
+            question_id: published.questions[0]?.id || null,
+            title: "Демо-конспект RAG",
+            content:
+              "RAG извлекает релевантные фрагменты из учебных материалов и помогает AI проверять ответ не только по общим знаниям, но и по конкретному контексту курса."
+          })
+        },
+        pair.access_token
+      );
+      await loadMe(pair.access_token);
+      const refreshedTests = await loadTests(pair.access_token);
+      const refreshedDemo = refreshedTests.find((item) => item.id === published.id) || published;
+      setSelectedTest(refreshedDemo);
+      if (flow === "materials") {
+        await loadMaterials(refreshedDemo.id, pair.access_token);
+        setActiveSection("materials");
+      } else if (flow === "take") {
+        const nextAttempt = await apiFetch<Attempt>(
+          "/attempts",
+          { method: "POST", body: JSON.stringify({ test_id: refreshedDemo.id }) },
+          pair.access_token
+        );
+        setAttempt(nextAttempt);
+        setAttemptHistory([nextAttempt]);
+        setActiveSection("take");
+      } else {
+        setActiveSection("builder");
+      }
+      setStatus("Демо готово к работе");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось запустить демо."));
+    }
+  }
+
   async function createTest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -338,11 +486,7 @@ export default function TuneAIApp() {
             title: String(form.get("title")),
             description: String(form.get("description")),
             test_type: String(form.get("test_type")),
-            criteria: {
-              completeness: "Ответ раскрывает ключевые пункты.",
-              correctness: "Утверждения фактически корректны.",
-              argumentation: "Аргументация последовательна и подкреплена объяснением."
-            },
+            criteria: buildCriteriaFromForm(form),
             questions: [
               {
                 text: question,
@@ -389,6 +533,7 @@ export default function TuneAIApp() {
             title: String(form.get("title")),
             description: String(form.get("description") || ""),
             status: String(form.get("status")),
+            criteria: buildCriteriaFromForm(form),
             time_limit_seconds: timeLimitRaw ? Number(timeLimitRaw) : null
           })
         },
@@ -591,11 +736,17 @@ export default function TuneAIApp() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const file = form.get("file");
+    const questionId = String(form.get("question_id") || "");
     try {
       if (file instanceof File && file.size > 0) {
         const payload = new FormData();
         payload.append("file", file);
-        await apiFetch<Material>(`/materials/upload?test_id=${selectedTest.id}`, { method: "POST", body: payload }, token);
+        const scope = questionId ? `&question_id=${encodeURIComponent(questionId)}` : "";
+        await apiFetch<Material>(
+          `/materials/upload?test_id=${selectedTest.id}${scope}`,
+          { method: "POST", body: payload },
+          token
+        );
       } else {
         await apiFetch<Material>(
           "/materials",
@@ -603,6 +754,7 @@ export default function TuneAIApp() {
             method: "POST",
             body: JSON.stringify({
               test_id: selectedTest.id,
+              question_id: questionId || null,
               title: String(form.get("title") || "Учебный материал"),
               content: String(form.get("content"))
             })
@@ -786,6 +938,21 @@ export default function TuneAIApp() {
             <div><span>04</span><strong>YandexGPT</strong><small>Объяснимая обратная связь</small></div>
           </section>
 
+          <section className="demo-console" aria-label="Демо TuneAI">
+            <button onClick={() => startDemoFlow("builder")}>
+              <Plus size={17} />
+              <span><strong>Создать тест</strong><small>Открыть конструктор с примером</small></span>
+            </button>
+            <button onClick={() => startDemoFlow("materials")}>
+              <Database size={17} />
+              <span><strong>Загрузить RAG</strong><small>Привязать материал к вопросу</small></span>
+            </button>
+            <button onClick={() => startDemoFlow("take")}>
+              <Play size={17} />
+              <span><strong>Пройти демо</strong><small>Запустить попытку с записью</small></span>
+            </button>
+          </section>
+
           <div className="brand-wordmark" aria-hidden="true">tuneai</div>
         </section>
       </main>
@@ -871,6 +1038,7 @@ export default function TuneAIApp() {
             manageableTests={manageableTests}
             takableTests={takableTests}
             attempt={attempt}
+            attemptHistory={attemptHistory}
             status={status}
             onOpen={setActiveSection}
           />
@@ -995,6 +1163,7 @@ function JourneyOverview({
   manageableTests,
   takableTests,
   attempt,
+  attemptHistory,
   status,
   onOpen
 }: {
@@ -1003,6 +1172,7 @@ function JourneyOverview({
   manageableTests: Test[];
   takableTests: Test[];
   attempt: Attempt | null;
+  attemptHistory: Attempt[];
   status: string;
   onOpen: (section: SectionId) => void;
 }) {
@@ -1024,6 +1194,15 @@ function JourneyOverview({
             ["2", "Настроить материалы", "materials"],
             ["3", user.role === "admin" ? "Проверить мониторинг" : "Проверить ответы", user.role === "admin" ? "admin" : "review"]
           ];
+  const competencies = buildCompetencyMap(attempt ? [attempt, ...attemptsWithoutActive(attemptHistory, attempt.id)] : attemptHistory, tests);
+  const roleMatrix = [
+    ["Создает тесты", "admin, teacher, interviewer, student"],
+    ["Создает вопросы", "владелец теста, admin"],
+    ["Загружает RAG", "владелец теста, admin"],
+    ["Назначает тесты", "admin"],
+    ["Проверяет ответы", "admin, teacher, interviewer"],
+    ["Администрирует", "admin"]
+  ];
 
   return (
     <section className="overview-layout">
@@ -1045,8 +1224,45 @@ function JourneyOverview({
           ))}
         </div>
       </section>
+
+      <section className="panel">
+        <div className="panel-title"><BarChart3 size={18} /> Карта компетенций</div>
+        {competencies.length ? (
+          <div className="competency-grid">
+            {competencies.map((item) => (
+              <div className="competency-row" key={item.name}>
+                <div>
+                  <strong>{item.name}</strong>
+                  <small>{item.completed} завершенных попыток</small>
+                </div>
+                <span>{item.percent}%</span>
+                <progress value={item.percent} max={100} />
+                <p>{item.recommendation}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">После первой проверенной попытки здесь появятся сильные и слабые темы.</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-title"><Shield size={18} /> Разделение ролей</div>
+        <div className="role-matrix">
+          {roleMatrix.map(([action, roles]) => (
+            <div key={action}>
+              <strong>{action}</strong>
+              <span>{roles}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </section>
   );
+}
+
+function attemptsWithoutActive(attempts: Attempt[], activeAttemptId: string) {
+  return attempts.filter((item) => item.id !== activeAttemptId);
 }
 
 function MetricCard({ label, value, text }: { label: string; value: string | number; text: string }) {
@@ -1126,6 +1342,11 @@ function BuilderPanel({
         <form onSubmit={onCreateTest} className="stack compact">
           <input name="title" placeholder="Название" required minLength={3} />
           <textarea name="description" placeholder="Краткое описание" rows={3} />
+          <select name="scenario" defaultValue={user.role === "student" ? "self_training" : "exam"}>
+            <option value="self_training">Самоподготовка</option>
+            <option value="exam">Устный экзамен</option>
+            <option value="interview">Интервью</option>
+          </select>
           <select name="test_type" defaultValue={user.role === "student" ? "self_training" : "exam"}>
             {user.role === "student" ? (
               <option value="self_training">Тренировка</option>
@@ -1137,6 +1358,21 @@ function BuilderPanel({
               </>
             )}
           </select>
+          <input name="competencies" placeholder="Компетенции через запятую: outbox, RAG, архитектура" />
+          <textarea name="rubric" placeholder="Критерии проверки" rows={3} defaultValue={DEFAULT_RUBRIC} />
+          <div className="settings-form mini">
+            <select name="agent_profile" defaultValue={DEFAULT_AGENT}>
+              <option value="rubric-rag-reviewer">Rubric + RAG reviewer</option>
+              <option value="exam-strict-reviewer">Строгий экзаменатор</option>
+              <option value="interview-coach">Интервью-коуч</option>
+              <option value="self-training-mentor">Ментор самоподготовки</option>
+            </select>
+            <select name="strictness" defaultValue="balanced">
+              <option value="soft">Мягкая проверка</option>
+              <option value="balanced">Сбалансированная</option>
+              <option value="strict">Строгая</option>
+            </select>
+          </div>
           <textarea name="question" placeholder="Первый вопрос" rows={3} required />
           <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии проверки" rows={4} />
           <button className="primary" type="submit"><Plus size={17} /> Создать</button>
@@ -1154,6 +1390,50 @@ function BuilderPanel({
                 <option value="draft">Черновик</option>
                 <option value="published">Опубликован</option>
                 <option value="archived">В архиве</option>
+              </select>
+              <input
+                name="competencies"
+                defaultValue={
+                  Array.isArray(selectedTest.criteria?.competencies)
+                    ? (selectedTest.criteria.competencies as string[]).join(", ")
+                    : ""
+                }
+                placeholder="Компетенции через запятую"
+              />
+              <textarea
+                name="rubric"
+                defaultValue={getCriteriaString(selectedTest, "rubric", DEFAULT_RUBRIC)}
+                placeholder="Критерии проверки"
+                rows={4}
+              />
+              <select name="scenario" defaultValue={getCriteriaString(selectedTest, "scenario", selectedTest.test_type)}>
+                <option value="self_training">Самоподготовка</option>
+                <option value="exam">Устный экзамен</option>
+                <option value="interview">Интервью</option>
+              </select>
+              <select name="agent_profile" defaultValue={getCriteriaString(selectedTest, "agent_profile", DEFAULT_AGENT)}>
+                <option value="rubric-rag-reviewer">Rubric + RAG reviewer</option>
+                <option value="exam-strict-reviewer">Строгий экзаменатор</option>
+                <option value="interview-coach">Интервью-коуч</option>
+                <option value="self-training-mentor">Ментор самоподготовки</option>
+              </select>
+              <select name="strictness" defaultValue={getCriteriaString(selectedTest, "strictness", "balanced")}>
+                <option value="soft">Мягкая проверка</option>
+                <option value="balanced">Сбалансированная</option>
+                <option value="strict">Строгая</option>
+              </select>
+              <input
+                name="review_confidence_threshold"
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                defaultValue={getCriteriaNumber(selectedTest, "review_confidence_threshold", 0.78)}
+                placeholder="Порог ревью AI"
+              />
+              <select name="material_policy" defaultValue={getCriteriaString(selectedTest, "material_policy", "test_and_question")}>
+                <option value="test_only">Материалы только на тест</option>
+                <option value="test_and_question">Материалы на тест и вопросы</option>
               </select>
               <input
                 name="time_limit_seconds"
@@ -1234,14 +1514,30 @@ function MaterialsAccessPanel({
             <div className="panel-title"><Database size={18} /> Материалы: {selectedTest.title}</div>
             <form onSubmit={onUploadMaterial} className="material-form">
               <input name="title" placeholder="Название материала" />
+              <select name="question_id" defaultValue="">
+                <option value="">Для всего теста</option>
+                {selectedTest.questions.map((question, index) => (
+                  <option key={question.id} value={question.id}>
+                    Вопрос {index + 1}: {question.text.slice(0, 64)}
+                  </option>
+                ))}
+              </select>
               <input name="file" type="file" accept=".txt,.md,text/plain,text/markdown" />
               <textarea name="content" placeholder="Вставьте конспект, лекцию или критерии проверки" rows={4} minLength={20} />
               <button className="secondary" type="submit"><Upload size={17} /> Добавить</button>
             </form>
             <div className="material-list">
-              {materials.map((material) => (
-                <span key={material.id}>{material.title}</span>
-              ))}
+              {materials.map((material) => {
+                const questionIndex = selectedTest.questions.findIndex((question) => question.id === material.question_id);
+                return (
+                  <span key={material.id}>
+                    {material.title}
+                    <small>
+                      {material.question_id && questionIndex >= 0 ? `Вопрос ${questionIndex + 1}` : "Весь тест"}
+                    </small>
+                  </span>
+                );
+              })}
               {!materials.length && <p className="muted">Материалы еще не добавлены.</p>}
             </div>
 
