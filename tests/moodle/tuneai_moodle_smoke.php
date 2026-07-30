@@ -51,6 +51,18 @@ if (!is_string($questionId)) {
     fail('Attempt response does not include visible question id');
 }
 
+$manifest = requestJson(
+    'GET',
+    $baseUrl . '/integrations/moodle/manifest?methodist_email=demo-methodist-owner%40tuneai.dev&test_id=' . rawurlencode($testId),
+    ['X-TuneAI-Integration-Key: ' . $token],
+    null,
+    200
+);
+
+assertSame($testId, $manifest['tests'][0]['id'] ?? null, 'manifest test id');
+assertSame('demo-methodist-owner@tuneai.dev', $manifest['tests'][0]['owner_email'] ?? null, 'manifest owner email');
+assertSame($questionId, $manifest['tests'][0]['questions'][0]['id'] ?? null, 'manifest question id');
+
 $externalSubmissionId = 'moodle-e2e-submission-' . $stamp;
 $submission = requestJson(
     'POST',
@@ -62,6 +74,9 @@ $submission = requestJson(
         'moodle_user_id' => 'moodle-e2e-user-' . $stamp,
         'moodle_course_id' => 'course-e2e',
         'moodle_activity_id' => 'quiz-e2e',
+        'moodle_group_id' => 'group-e2e',
+        'moodle_group_name' => 'E2E group',
+        'methodist_email' => 'demo-methodist-owner@tuneai.dev',
         'user_email' => 'moodle-e2e-' . $stamp . '@example.edu',
         'user_full_name' => 'Moodle E2E Student',
         'test_id' => $testId,
@@ -73,6 +88,10 @@ $submission = requestJson(
 
 assertSame($externalSubmissionId, $submission['external_submission_id'] ?? null, 'submission id');
 assertSame(false, (bool) ($submission['result_ready'] ?? false), 'initial result_ready');
+assertSame('course-e2e', $submission['moodle_course_id'] ?? null, 'submission course id');
+assertSame('quiz-e2e', $submission['moodle_activity_id'] ?? null, 'submission activity id');
+assertSame('group-e2e', $submission['moodle_group_id'] ?? null, 'submission group id');
+assertSame('demo-methodist-owner@tuneai.dev', $submission['methodist_email'] ?? null, 'submission methodist');
 
 $replay = requestJson(
     'POST',
@@ -84,6 +103,9 @@ $replay = requestJson(
         'moodle_user_id' => 'moodle-e2e-user-' . $stamp,
         'moodle_course_id' => 'course-e2e',
         'moodle_activity_id' => 'quiz-e2e',
+        'moodle_group_id' => 'group-e2e',
+        'moodle_group_name' => 'E2E group',
+        'methodist_email' => 'demo-methodist-owner@tuneai.dev',
         'user_email' => 'moodle-e2e-' . $stamp . '@example.edu',
         'user_full_name' => 'Moodle E2E Student',
         'test_id' => $testId,

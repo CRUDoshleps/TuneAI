@@ -14,6 +14,8 @@ Moodle может:
 
 В текущем коде реализована backend-интеграция и Docker smoke-тест на реальном Moodle-контейнере. Готового Moodle plugin UI в репозитории пока нет: его нужно собрать поверх endpoints ниже.
 
+В репозитории также есть заготовка Moodle local plugin: [integrations/moodle/local_tuneai](../integrations/moodle/local_tuneai). Ее можно положить в чужой Moodle как `local/tuneai` и использовать как основу для настройки mapping и отправки ответов.
+
 ## Включение
 
 ```env
@@ -31,6 +33,30 @@ Service token хранится только на стороне Moodle или и
 
 ![TuneAI API endpoints для Moodle](screenshots/moodle-swagger-endpoints.png)
 
+## Установка заготовки плагина в чужой Moodle
+
+1. Скопируйте каталог `integrations/moodle/local_tuneai` в Moodle как `local/tuneai`.
+2. Откройте админку Moodle и завершите установку local plugin.
+3. В настройках `Site administration -> Plugins -> Local plugins -> TuneAI integration` укажите:
+   - `TuneAI base URL`;
+   - `TuneAI integration key`;
+   - `Enable TuneAI`.
+4. На стороне TuneAI включите:
+
+```env
+MOODLE_INTEGRATION_ENABLED=true
+MOODLE_INTEGRATION_TOKEN=<same-service-token>
+```
+
+Заготовка содержит:
+
+- таблицу `local_tuneai_map` для mapping Moodle course/activity/question/group -> TuneAI test/question/methodist;
+- таблицу `local_tuneai_submission` для зеркала статуса проверки;
+- capabilities `local/tuneai:manage`, `local/tuneai:submit`, `local/tuneai:viewresults`;
+- `client.php` для вызова TuneAI;
+- `question_reader.php` для чтения Moodle `question_attempts`;
+- `submission_service.php` для отправки ответа в TuneAI.
+
 ## Связка Moodle и TuneAI
 
 Минимальная модель данных на стороне Moodle:
@@ -38,12 +64,21 @@ Service token хранится только на стороне Moodle или и
 - Moodle course id;
 - Moodle activity id, например quiz, assignment или custom activity;
 - Moodle question id или slot id;
+- Moodle group id, если один и тот же вопрос в разных группах должен вести в разные TuneAI тесты;
 - TuneAI `test_id`;
 - TuneAI `question_id`;
 - правила выставления оценки в Gradebook;
 - политика ручной проверки при `teacher_signal`.
 
 Связку лучше хранить в настройках Moodle activity. Преподаватель выбирает опубликованный TuneAI test, затем сопоставляет каждый Moodle question с TuneAI question.
+
+Перед настройкой mapping Moodle может запросить TuneAI manifest:
+
+```text
+GET /integrations/moodle/manifest?methodist_email=methodist@example.edu
+```
+
+Ответ содержит опубликованные тесты владельца и список вопросов. Это нужно, чтобы Moodle не просил администратора вручную копировать id и не позволял случайно привязать вопрос к чужому тесту.
 
 ## Текстовый ответ
 
@@ -58,6 +93,9 @@ POST /integrations/moodle/submissions/text
   "moodle_user_id": "42",
   "moodle_course_id": "course-10",
   "moodle_activity_id": "quiz-7",
+  "moodle_group_id": "group-3",
+  "moodle_group_name": "PI-101",
+  "methodist_email": "methodist@example.edu",
   "user_email": "student@example.edu",
   "user_full_name": "Student Name",
   "test_id": "TuneAI test id",
@@ -69,6 +107,8 @@ POST /integrations/moodle/submissions/text
 TuneAI создает или переиспользует пользователя Moodle как `examinee`, назначает опубликованный тест, создает попытку и ставит ответ в тот же outbox/worker pipeline, что и обычные ответы TuneAI.
 
 `external_submission_id` работает как idempotency key. Повтор такого же запроса вернет существующий answer/result.
+
+Если `methodist_email` указан, TuneAI проверяет, что `test_id` принадлежит этому владельцу. Если Moodle отправит вопрос в чужой тест, API вернет `403`.
 
 Текстовый сценарий для Moodle:
 
@@ -92,6 +132,9 @@ Content-Type: multipart/form-data
 - `moodle_user_id`;
 - `moodle_course_id`;
 - `moodle_activity_id`;
+- `moodle_group_id`;
+- `moodle_group_name`;
+- `methodist_email`;
 - `user_email`;
 - `user_full_name`;
 - `test_id`;
@@ -159,12 +202,15 @@ TuneAI принимает submissions только для опубликован
 
 ## Что должен делать Moodle plugin
 
-- Страница настроек activity: выбрать TuneAI test и сопоставить вопросы.
+- Страница настроек activity: загрузить manifest, выбрать TuneAI test и сопоставить вопросы.
+- Mapping repository: учитывать `courseid`, `cmid`, `questionid` и опциональный `groupid`.
 - UI прохождения: показать текстовый ответ или кнопку записи голоса.
 - Backend controller: принять submission от Moodle, вызвать TuneAI service API.
 - Scheduled task: периодически опрашивать result endpoint.
 - Gradebook adapter: выставить оценку, feedback и статус ручной проверки.
 - Teacher view: показать `teacher_signal`, `review_reason`, confidence и AI feedback.
+
+Заготовка `local_tuneai` уже дает базовые классы для этих действий. UI форм настройки и scheduled task остаются следующим шагом реализации Moodle plugin.
 
 ## E2E-проверка с Moodle в Docker
 

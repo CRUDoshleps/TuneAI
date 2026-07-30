@@ -1,8 +1,8 @@
 import secrets
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.core.security import hash_password
@@ -22,7 +22,7 @@ from app.models import (
     User,
     new_id,
 )
-from app.schemas import MoodleSubmissionRead, MoodleTextSubmissionRequest
+from app.schemas import MoodleManifestQuestion, MoodleManifestRead, MoodleManifestTest, MoodleSubmissionRead, MoodleTextSubmissionRequest
 from app.services.outbox import ANSWER_UPLOADED, add_outbox_event
 from app.services.storage import StorageService
 
@@ -39,6 +39,50 @@ def require_moodle_key(x_tuneai_integration_key: str | None = Header(default=Non
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Moodle integration token")
 
 
+@router.get("/manifest", response_model=MoodleManifestRead)
+def get_manifest(
+    methodist_email: str | None = Query(default=None, max_length=255),
+    test_id: str | None = Query(default=None, max_length=36),
+    db: Session = Depends(get_db),
+    _: None = Depends(require_moodle_key),
+) -> MoodleManifestRead:
+    statement = (
+        select(Test)
+        .where(Test.status == TestStatusEnum.published)
+        .options(selectinload(Test.questions), selectinload(Test.owner))
+        .order_by(Test.created_at.desc())
+    )
+    if test_id:
+        statement = statement.where(Test.id == test_id)
+    if methodist_email:
+        statement = statement.join(User, Test.owner_id == User.id).where(User.email == methodist_email.lower())
+    tests = db.scalars(statement).all()
+    return MoodleManifestRead(
+        tests=[
+            MoodleManifestTest(
+                id=test.id,
+                title=test.title,
+                description=test.description,
+                test_type=test.test_type,
+                owner_id=test.owner_id,
+                owner_email=test.owner.email,
+                owner_name=test.owner.full_name,
+                questions=[
+                    MoodleManifestQuestion(
+                        id=question.id,
+                        text=question.text,
+                        order_index=question.order_index,
+                        max_score=question.max_score,
+                        competencies=question.competencies,
+                    )
+                    for question in sorted(test.questions, key=lambda item: item.order_index)
+                ],
+            )
+            for test in tests
+        ]
+    )
+
+
 @router.post("/submissions/text", response_model=MoodleSubmissionRead, status_code=status.HTTP_201_CREATED)
 def submit_text(
     payload: MoodleTextSubmissionRequest,
@@ -48,7 +92,7 @@ def submit_text(
     existing = _load_existing_submission(db, payload.external_submission_id)
     if existing:
         return _serialize_moodle_submission(db, existing)
-    test, question = _load_published_test_question(db, payload.test_id, payload.question_id)
+    test, question = _load_published_test_question(db, payload.test_id, payload.question_id, payload.methodist_email)
     user = _get_or_create_moodle_user(db, payload)
     _ensure_assignment(db, test, user)
     attempt = _get_or_create_attempt(db, test.id, user.id, payload.external_attempt_id)
@@ -83,6 +127,9 @@ async def submit_audio(
     external_attempt_id: str | None = Form(default=None),
     moodle_course_id: str | None = Form(default=None),
     moodle_activity_id: str | None = Form(default=None),
+    moodle_group_id: str | None = Form(default=None),
+    moodle_group_name: str | None = Form(default=None),
+    methodist_email: str | None = Form(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     _: None = Depends(require_moodle_key),
@@ -96,13 +143,16 @@ async def submit_audio(
         moodle_user_id=moodle_user_id,
         moodle_course_id=moodle_course_id,
         moodle_activity_id=moodle_activity_id,
+        moodle_group_id=moodle_group_id,
+        moodle_group_name=moodle_group_name,
+        methodist_email=methodist_email,
         user_email=user_email,
         user_full_name=user_full_name,
         test_id=test_id,
         question_id=question_id,
         text="audio",
     )
-    test, question = _load_published_test_question(db, test_id, question_id)
+    test, question = _load_published_test_question(db, test_id, question_id, payload.methodist_email)
     user = _get_or_create_moodle_user(db, payload)
     _ensure_assignment(db, test, user)
     attempt = _get_or_create_attempt(db, test.id, user.id, external_attempt_id)
@@ -141,12 +191,14 @@ def _load_existing_submission(db: Session, external_submission_id: str) -> Moodl
     return db.scalar(select(MoodleSubmission).where(MoodleSubmission.external_submission_id == external_submission_id))
 
 
-def _load_published_test_question(db: Session, test_id: str, question_id: str) -> tuple[Test, Question]:
-    test = db.get(Test, test_id)
+def _load_published_test_question(db: Session, test_id: str, question_id: str, methodist_email: str | None = None) -> tuple[Test, Question]:
+    test = db.scalar(select(Test).where(Test.id == test_id).options(selectinload(Test.owner)))
     if not test:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
     if test.status != TestStatusEnum.published:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Moodle can submit only published tests")
+    if methodist_email and test.owner.email != methodist_email.lower():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Test does not belong to the requested methodist")
     question = db.get(Question, question_id)
     if not question or question.test_id != test.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
@@ -246,6 +298,9 @@ def _create_submission(
         moodle_user_id=payload.moodle_user_id,
         moodle_course_id=payload.moodle_course_id,
         moodle_activity_id=payload.moodle_activity_id,
+        moodle_group_id=payload.moodle_group_id,
+        moodle_group_name=payload.moodle_group_name,
+        methodist_email=str(payload.methodist_email).lower() if payload.methodist_email else None,
         test_id=payload.test_id,
         question_id=payload.question_id,
         user_id=user.id,
@@ -275,6 +330,13 @@ def _serialize_moodle_submission(db: Session, submission: MoodleSubmission) -> M
     return MoodleSubmissionRead(
         external_submission_id=submission.external_submission_id,
         external_attempt_id=submission.external_attempt_id,
+        moodle_course_id=submission.moodle_course_id,
+        moodle_activity_id=submission.moodle_activity_id,
+        moodle_group_id=submission.moodle_group_id,
+        moodle_group_name=submission.moodle_group_name,
+        methodist_email=submission.methodist_email,
+        test_id=submission.test_id,
+        question_id=submission.question_id,
         attempt_id=submission.attempt_id,
         answer_id=submission.answer_id,
         answer_status=answer.status,

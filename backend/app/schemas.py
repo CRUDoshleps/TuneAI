@@ -389,6 +389,9 @@ class MoodleTextSubmissionRequest(BaseModel):
     moodle_user_id: str = Field(min_length=1, max_length=255)
     moodle_course_id: str | None = Field(default=None, max_length=255)
     moodle_activity_id: str | None = Field(default=None, max_length=255)
+    moodle_group_id: str | None = Field(default=None, max_length=255)
+    moodle_group_name: str | None = Field(default=None, max_length=255)
+    methodist_email: EmailStr | None = None
     user_email: EmailStr
     user_full_name: str = Field(min_length=2, max_length=255)
     test_id: str
@@ -399,6 +402,13 @@ class MoodleTextSubmissionRequest(BaseModel):
 class MoodleSubmissionRead(BaseModel):
     external_submission_id: str
     external_attempt_id: str | None = None
+    moodle_course_id: str | None = None
+    moodle_activity_id: str | None = None
+    moodle_group_id: str | None = None
+    moodle_group_name: str | None = None
+    methodist_email: EmailStr | None = None
+    test_id: str
+    question_id: str
     attempt_id: str
     answer_id: str
     answer_status: AnswerStatusEnum
@@ -412,6 +422,29 @@ class MoodleSubmissionRead(BaseModel):
     review_reason: str | None = None
     teacher_signal: Literal["none", "review_recommended", "processing_failed"] = "none"
     transcript: str | None = None
+
+
+class MoodleManifestQuestion(BaseModel):
+    id: str
+    text: str
+    order_index: int
+    max_score: float
+    competencies: list[QuestionCompetency] = []
+
+
+class MoodleManifestTest(BaseModel):
+    id: str
+    title: str
+    description: str
+    test_type: TestTypeEnum
+    owner_id: str
+    owner_email: EmailStr
+    owner_name: str
+    questions: list[MoodleManifestQuestion]
+
+
+class MoodleManifestRead(BaseModel):
+    tests: list[MoodleManifestTest]
 
 
 class AdminDashboard(BaseModel):

@@ -93,12 +93,15 @@ Endpoints доступны ролям, которые могут создава�
 ## Moodle
 
 ```text
+GET /integrations/moodle/manifest
 POST /integrations/moodle/submissions/text
 POST /integrations/moodle/submissions/audio
 GET /integrations/moodle/submissions/{external_submission_id}/result
 ```
 
-Endpoints защищены `X-TuneAI-Integration-Key` и используются Moodle-плагином для отправки текстовых или голосовых ответов, получения оценки и сигнала преподавателю `teacher_signal`.
+Endpoints защищены `X-TuneAI-Integration-Key` и используются Moodle-плагином для выбора опубликованных тестов/вопросов, отправки текстовых или голосовых ответов, получения оценки и сигнала преподавателю `teacher_signal`.
+
+`/manifest` поддерживает query params `methodist_email` и `test_id`. Submission payload может передавать `moodle_course_id`, `moodle_activity_id`, `moodle_group_id`, `moodle_group_name` и `methodist_email`. Если `methodist_email` указан, TuneAI проверяет, что тест принадлежит этому владельцу.
 
 ## Demo Bootstrap
 

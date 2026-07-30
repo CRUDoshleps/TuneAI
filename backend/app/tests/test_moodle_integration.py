@@ -16,11 +16,15 @@ def _enable_moodle(monkeypatch):
 
 def _create_published_test(client):
     admin_token = register_and_login(client, "admin@example.com")
+    return _create_published_test_for_token(client, admin_token)
+
+
+def _create_published_test_for_token(client, token, title="Moodle oral checkpoint"):
     response = client.post(
         "/tests",
-        headers=auth_header(admin_token),
+        headers=auth_header(token),
         json={
-            "title": "Moodle oral checkpoint",
+            "title": title,
             "test_type": "exam",
             "questions": [
                 {
@@ -32,9 +36,21 @@ def _create_published_test(client):
         },
     )
     assert response.status_code == 201, response.text
-    published = client.patch(f"/tests/{response.json()['id']}", headers=auth_header(admin_token), json={"status": "published"})
+    published = client.patch(f"/tests/{response.json()['id']}", headers=auth_header(token), json={"status": "published"})
     assert published.status_code == 200, published.text
     return published.json()
+
+
+def _create_staff_user(client, admin_token, email, role="methodist"):
+    response = client.post(
+        "/users",
+        headers=auth_header(admin_token),
+        json={"email": email, "full_name": "Moodle Owner", "password": "password123", "role": role},
+    )
+    assert response.status_code == 201, response.text
+    login = client.post("/auth/login", json={"email": email, "password": "password123"})
+    assert login.status_code == 200, login.text
+    return login.json()["access_token"]
 
 
 def test_moodle_integration_requires_enabled_token(client, monkeypatch):
@@ -69,6 +85,9 @@ def test_moodle_text_submission_replays_and_returns_teacher_signal(client, monke
         "moodle_user_id": "42",
         "moodle_course_id": "course-10",
         "moodle_activity_id": "quiz-7",
+        "moodle_group_id": "group-3",
+        "moodle_group_name": "PI-101",
+        "methodist_email": "admin@example.com",
         "user_email": "student42@example.edu",
         "user_full_name": "Moodle Student",
         "test_id": test["id"],
@@ -82,6 +101,13 @@ def test_moodle_text_submission_replays_and_returns_teacher_signal(client, monke
     assert body["answer_status"] == "queued_for_transcription"
     assert body["result_ready"] is False
     assert body["max_score"] == 10
+    assert body["moodle_course_id"] == "course-10"
+    assert body["moodle_activity_id"] == "quiz-7"
+    assert body["moodle_group_id"] == "group-3"
+    assert body["moodle_group_name"] == "PI-101"
+    assert body["methodist_email"] == "admin@example.com"
+    assert body["test_id"] == test["id"]
+    assert body["question_id"] == question_id
 
     replay = client.post("/integrations/moodle/submissions/text", headers=headers, json={**payload, "text": "Different text"})
     assert replay.status_code == 201
@@ -119,6 +145,9 @@ def test_moodle_audio_submission_creates_audio_answer(client, monkeypatch):
             "external_submission_id": "audio-sub-1",
             "external_attempt_id": "audio-attempt-1",
             "moodle_user_id": "55",
+            "moodle_group_id": "group-audio",
+            "moodle_group_name": "Voice group",
+            "methodist_email": "admin@example.com",
             "user_email": "speaker55@example.edu",
             "user_full_name": "Speaker Student",
             "test_id": test["id"],
@@ -127,11 +156,53 @@ def test_moodle_audio_submission_creates_audio_answer(client, monkeypatch):
         files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
     )
     assert submitted.status_code == 201, submitted.text
+    assert submitted.json()["moodle_group_id"] == "group-audio"
     with SessionLocal() as db:
         answer = db.get(Answer, submitted.json()["answer_id"])
         assert answer is not None
         assert answer.answer_type == AnswerTypeEnum.audio
         assert answer.audio_object_key
+
+
+def test_moodle_manifest_filters_published_tests_by_methodist(client, monkeypatch):
+    headers = _enable_moodle(monkeypatch)
+    admin_token = register_and_login(client, "admin@example.com")
+    first_methodist_token = _create_staff_user(client, admin_token, "methodist.one@example.edu")
+    second_methodist_token = _create_staff_user(client, admin_token, "methodist.two@example.edu")
+    first_test = _create_published_test_for_token(client, first_methodist_token, "First methodist exam")
+    _create_published_test_for_token(client, second_methodist_token, "Second methodist exam")
+
+    response = client.get(
+        "/integrations/moodle/manifest",
+        headers=headers,
+        params={"methodist_email": "methodist.one@example.edu"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [test["id"] for test in body["tests"]] == [first_test["id"]]
+    assert body["tests"][0]["owner_email"] == "methodist.one@example.edu"
+    assert body["tests"][0]["questions"][0]["id"] == first_test["questions"][0]["id"]
+
+
+def test_moodle_submission_rejects_wrong_methodist_scope(client, monkeypatch):
+    headers = _enable_moodle(monkeypatch)
+    test = _create_published_test(client)
+    payload = {
+        "external_submission_id": "wrong-methodist-submission",
+        "moodle_user_id": "42",
+        "user_email": "student42@example.edu",
+        "user_full_name": "Moodle Student",
+        "methodist_email": "other-owner@example.edu",
+        "test_id": test["id"],
+        "question_id": test["questions"][0]["id"],
+        "text": "This should not be accepted for another methodist.",
+    }
+
+    response = client.post("/integrations/moodle/submissions/text", headers=headers, json=payload)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Test does not belong to the requested methodist"
 
 
 def awaitable_process(db, answer_id):
