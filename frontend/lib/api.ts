@@ -1,3 +1,5 @@
+import { censorContent, censorText } from "./moderation";
+
 export type Role = "student" | "examinee" | "candidate" | "teacher" | "interviewer" | "admin";
 export type TestStatus = "draft" | "published" | "archived";
 export type TestType = "exam" | "self_training" | "interview";
@@ -267,12 +269,12 @@ function friendlyMessage(status: number, detail: unknown): string {
 
 export function getUserErrorMessage(error: unknown, fallback = "Что-то пошло не так. Попробуйте еще раз."): string {
   if (error instanceof ApiError) {
-    return error.message || fallback;
+    return censorText(error.message || fallback);
   }
   if (error instanceof Error) {
-    return detailMessages[error.message] || error.message || fallback;
+    return censorText(detailMessages[error.message] || error.message || fallback);
   }
-  return fallback;
+  return censorText(fallback);
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
@@ -302,7 +304,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, token
   if (response.status === 204) {
     return undefined as T;
   }
-  return (await response.json()) as T;
+  return censorContent((await response.json()) as T);
 }
 
 export { API_BASE };
