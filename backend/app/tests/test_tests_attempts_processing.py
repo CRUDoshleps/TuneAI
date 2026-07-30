@@ -3,10 +3,39 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models import Answer, AnswerStatusEnum, Material, OutboxEvent, OutboxStatusEnum
+from app.schemas import EvaluationResult
 from app.services.outbox import ANSWER_UPLOADED, MATERIAL_UPLOADED
 from app.services.processing import process_answer_uploaded
 from app.services.rag import index_material
 from app.tests.conftest import auth_header, register_and_login
+
+
+class RecordingAI:
+    def __init__(self):
+        from app.core.config import get_settings
+
+        self.settings = get_settings()
+        self.skill_instructions = ""
+
+    async def transcribe_audio(self, audio: bytes, content_type: str | None) -> str:
+        return "Recorded transcript"
+
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.1, 0.2]
+
+    async def embed_document(self, text: str) -> list[float]:
+        return [0.1, 0.2]
+
+    async def evaluate_answer(self, **kwargs):
+        self.skill_instructions = kwargs.get("ai_skill_instructions", "")
+        return EvaluationResult(
+            score=8,
+            max_score=kwargs["max_score"],
+            correct_points=["Uses the configured skill."],
+            feedback="Skill-aware feedback.",
+            recommendations="Keep using concrete terms.",
+            confidence=0.9,
+        )
 
 
 def create_sample_test(client, token):
@@ -531,6 +560,46 @@ def test_failed_answer_can_be_retried_with_new_idempotency_key(client):
         assert answer is not None
         assert answer.idempotency_key == "failed-text-2"
         assert answer.text_response == "Retry body"
+
+
+@pytest.mark.asyncio
+async def test_linked_ai_skill_is_sent_to_answer_evaluation(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    skill = client.post(
+        "/skills",
+        headers=auth_header(admin_token),
+        json={
+            "name": "Terminology focus",
+            "description": "Focus on exact terms",
+            "content": "Require exact domain terminology and mention missing definitions in feedback.",
+        },
+    )
+    assert skill.status_code == 201, skill.text
+    response = client.post(
+        "/tests",
+        headers=auth_header(admin_token),
+        json={
+            "title": "Skill-aware exam",
+            "test_type": "self_training",
+            "criteria": {"rubric": "Check answer.", "skill_ids": [skill.json()["id"]]},
+            "questions": [{"text": "Explain outbox?", "expected_answer": "Atomic event publishing.", "max_score": 10}],
+        },
+    )
+    assert response.status_code == 201, response.text
+    test = client.patch(f"/tests/{response.json()['id']}", headers=auth_header(admin_token), json={"status": "published"}).json()
+    attempt_response = client.post("/attempts", headers=auth_header(admin_token), json={"test_id": test["id"]})
+    answer_response = client.post(
+        f"/attempts/{attempt_response.json()['id']}/questions/{test['questions'][0]['id']}/text",
+        headers={**auth_header(admin_token), "Idempotency-Key": "skill-text"},
+        json={"text": "Outbox stores an event with business data atomically."},
+    )
+    assert answer_response.status_code == 201, answer_response.text
+    ai = RecordingAI()
+    with SessionLocal() as db:
+        processed = await process_answer_uploaded(db, answer_id=answer_response.json()["answers"][0]["id"], ai=ai)
+        assert "Terminology focus" in ai.skill_instructions
+        assert "Require exact domain terminology" in ai.skill_instructions
+        assert processed.evaluation["ai_skill_instructions_applied"] is True
 
 
 @pytest.mark.asyncio

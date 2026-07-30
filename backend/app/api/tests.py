@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.deps import can_create_tests, get_current_user
-from app.models import Answer, Assignment, Attempt, Material, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
+from app.models import AISkill, Answer, Assignment, Attempt, Material, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
 from app.schemas import AssignRequest, QuestionCreate, QuestionRead, QuestionReorderRequest, QuestionUpdate, TestCreate, TestRead, TestUpdate
 from app.services.moderation import censor_content, censor_text
 from app.services.access_control import can_manage_test, can_view_test
+from app.services.ai_skills import skill_ids_from_criteria
 
 
 router = APIRouter(prefix="/tests", tags=["tests"])
@@ -43,7 +44,7 @@ def create_test(
         title=censor_text(payload.title),
         description=censor_text(payload.description),
         test_type=payload.test_type,
-        criteria=censor_content(payload.criteria),
+        criteria=_validated_criteria(db, payload.criteria, user),
         time_limit_seconds=payload.time_limit_seconds,
         owner_id=user.id,
     )
@@ -88,7 +89,7 @@ def update_test(
         if field in {"title", "description"} and value is not None:
             value = censor_text(value)
         elif field == "criteria" and value is not None:
-            value = censor_content(value)
+            value = _validated_criteria(db, value, user)
         setattr(test, field, value)
     db.add(test)
     db.commit()
@@ -258,6 +259,21 @@ def _serialize_test(test: Test, user: User) -> dict:
         "question_count": len(questions),
         "questions": questions if can_manage else [],
     }
+
+
+def _validated_criteria(db: Session, criteria: dict, user: User) -> dict:
+    payload = censor_content(criteria)
+    skill_ids = skill_ids_from_criteria(payload)
+    if not skill_ids:
+        return payload
+    stmt = select(AISkill.id).where(AISkill.id.in_(skill_ids))
+    if user.role != RoleEnum.admin:
+        stmt = stmt.where(AISkill.owner_id == user.id)
+    available_ids = set(db.scalars(stmt).all())
+    if set(skill_ids) != available_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AI skill is not available for this test")
+    payload["skill_ids"] = skill_ids
+    return payload
 
 
 def _ensure_manager(test: Test, user: User) -> None:

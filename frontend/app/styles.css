@@ -1052,6 +1052,82 @@ textarea {
   min-height: 560px;
 }
 
+.ai-skills-panel {
+  grid-column: 2;
+  display: grid;
+  gap: 14px;
+}
+
+.skill-picker {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: #fffefa;
+}
+
+.skill-picker legend {
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--muted);
+}
+
+.skill-picker label {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+
+.skill-picker input {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin-top: 2px;
+}
+
+.skill-picker span,
+.skill-card-head span {
+  display: grid;
+  gap: 3px;
+}
+
+.skill-picker small,
+.skill-card-head small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.skill-upload-form,
+.skill-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.skill-upload-form {
+  grid-template-columns: minmax(150px, 1fr) minmax(160px, 1fr) minmax(180px, 1fr) auto;
+  align-items: center;
+}
+
+.skill-list {
+  display: grid;
+  gap: 12px;
+}
+
+.skill-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
 .journey-steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));
@@ -1856,7 +1932,8 @@ td {
   .assign-form,
   .admin-filters,
   .admin-user-form,
-  .ai-provider-create {
+  .ai-provider-create,
+  .skill-upload-form {
     grid-template-columns: 1fr;
   }
 
@@ -1916,7 +1993,8 @@ td {
   }
 
   .builder-layout > .panel:first-child,
-  .builder-detail {
+  .builder-detail,
+  .ai-skills-panel {
     grid-row: auto;
     grid-column: auto;
   }

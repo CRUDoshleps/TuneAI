@@ -40,6 +40,7 @@ import {
   AdminDashboard,
   AdminFailedJob,
   AIProviderConfig,
+  AISkill,
   Answer,
   apiFetch,
   Attempt,
@@ -129,9 +130,11 @@ function getCriteriaNumber(test: Test | null, key: string, fallback: number) {
 
 function buildCriteriaFromForm(form: FormData) {
   const competencies = parseCompetencies(String(form.get("competencies") || ""));
+  const skillIds = form.getAll("skill_ids").map((item) => String(item)).filter(Boolean);
   return {
     rubric: String(form.get("rubric") || DEFAULT_RUBRIC),
     competencies: competencies.map((item) => item.name),
+    skill_ids: skillIds,
     scenario: String(form.get("scenario") || form.get("test_type") || "exam"),
     agent_profile: String(form.get("agent_profile") || DEFAULT_AGENT),
     review_confidence_threshold: Number(form.get("review_confidence_threshold") || 0.78),
@@ -272,6 +275,7 @@ export default function TuneAIApp() {
   const [adminAttempts, setAdminAttempts] = useState<AdminAttempt[]>([]);
   const [failedJobs, setFailedJobs] = useState<AdminFailedJob[]>([]);
   const [aiProviders, setAiProviders] = useState<AIProviderConfig[]>([]);
+  const [aiSkills, setAiSkills] = useState<AISkill[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [adminMaterials, setAdminMaterials] = useState<Material[]>([]);
   const [adminMaterialTestId, setAdminMaterialTestId] = useState<string>("");
@@ -371,6 +375,9 @@ export default function TuneAIApp() {
     if (activePlatformConfig.permissions.answerReviewerRoles.includes(me.role as PlatformRole)) {
       await loadReviewQueue(activeToken);
     }
+    if (activePlatformConfig.permissions.testCreatorRoles.includes(me.role as PlatformRole)) {
+      await loadAISkills(activeToken);
+    }
     if (["teacher", "methodist", "interviewer"].includes(me.role)) {
       const users = await apiFetch<User[]>("/users", {}, activeToken);
       setAdminUsers(users);
@@ -424,6 +431,11 @@ export default function TuneAIApp() {
     setCompetencyMetrics(items);
   }
 
+  async function loadAISkills(activeToken = token) {
+    const items = await apiFetch<AISkill[]>("/skills", {}, activeToken);
+    setAiSkills(items);
+  }
+
   async function refreshAdminData() {
     setError("");
     try {
@@ -465,6 +477,7 @@ export default function TuneAIApp() {
     setAdminAttempts([]);
     setFailedJobs([]);
     setAiProviders([]);
+    setAiSkills([]);
     setMaterials([]);
     setAdminMaterials([]);
     setAdminMaterialTestId("");
@@ -691,6 +704,101 @@ export default function TuneAIApp() {
       formElement.reset();
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось добавить вопрос."));
+    }
+  }
+
+  async function createAISkill(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try {
+      await apiFetch<AISkill>(
+        "/skills",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: String(form.get("name")),
+            description: String(form.get("description") || ""),
+            content: String(form.get("content")),
+            is_active: true
+          })
+        },
+        token
+      );
+      await loadAISkills();
+      setStatus("AI-скилл создан");
+      formElement.reset();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось создать AI-скилл."));
+    }
+  }
+
+  async function uploadAISkill(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const file = form.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      setError("Выберите TXT или Markdown файл со скиллом.");
+      return;
+    }
+    const payload = new FormData();
+    payload.append("file", file);
+    const name = String(form.get("name") || "").trim();
+    const description = String(form.get("description") || "").trim();
+    const query = new URLSearchParams();
+    if (name) {
+      query.set("name", name);
+    }
+    if (description) {
+      query.set("description", description);
+    }
+    try {
+      await apiFetch<AISkill>(`/skills/upload${query.toString() ? `?${query}` : ""}`, { method: "POST", body: payload }, token);
+      await loadAISkills();
+      setStatus("AI-скилл загружен");
+      formElement.reset();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось загрузить AI-скилл."));
+    }
+  }
+
+  async function updateAISkill(skill: AISkill, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiFetch<AISkill>(
+        `/skills/${skill.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: String(form.get("name")),
+            description: String(form.get("description") || ""),
+            content: String(form.get("content")),
+            is_active: form.get("is_active") === "on"
+          })
+        },
+        token
+      );
+      await loadAISkills();
+      setStatus("AI-скилл обновлен");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось обновить AI-скилл."));
+    }
+  }
+
+  async function deleteAISkill(skill: AISkill) {
+    setError("");
+    try {
+      await apiFetch(`/skills/${skill.id}`, { method: "DELETE" }, token);
+      await loadAISkills();
+      await loadTests();
+      setStatus("AI-скилл удален");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось удалить AI-скилл."));
     }
   }
 
@@ -1350,6 +1458,12 @@ export default function TuneAIApp() {
                     return undefined;
                   })
                   .then(() => {
+                    if (canCreateTests) {
+                      return loadAISkills();
+                    }
+                    return undefined;
+                  })
+                  .then(() => {
                     if (user.role === "admin") {
                       return loadAdmin();
                     }
@@ -1431,6 +1545,7 @@ export default function TuneAIApp() {
           <BuilderPanel
             user={user}
             tests={manageableTests}
+            skills={aiSkills}
             selectedTest={selectedTest}
             onSelect={(test) => {
               setSelectedTest(test);
@@ -1440,6 +1555,10 @@ export default function TuneAIApp() {
             onCreateTest={createTest}
             onUpdateTest={updateTestSettings}
             onAddQuestion={addQuestion}
+            onCreateSkill={createAISkill}
+            onUploadSkill={uploadAISkill}
+            onUpdateSkill={updateAISkill}
+            onDeleteSkill={deleteAISkill}
           />
         )}
 
@@ -1691,21 +1810,32 @@ function TestPicker({
 function BuilderPanel({
   user,
   tests,
+  skills,
   selectedTest,
   onSelect,
   onCreateTest,
   onUpdateTest,
-  onAddQuestion
+  onAddQuestion,
+  onCreateSkill,
+  onUploadSkill,
+  onUpdateSkill,
+  onDeleteSkill
 }: {
   user: User;
   tests: Test[];
+  skills: AISkill[];
   selectedTest: Test | null;
   onSelect: (test: Test) => void;
   onCreateTest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateTest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onAddQuestion: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onCreateSkill: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUploadSkill: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateSkill: (skill: AISkill, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onDeleteSkill: (skill: AISkill) => Promise<void>;
 }) {
   const manageableSelected = selectedTest && tests.some((test) => test.id === selectedTest.id);
+  const selectedSkillIds = selectedTest ? getSkillIds(selectedTest) : [];
 
   return (
     <section className="builder-layout">
@@ -1753,6 +1883,7 @@ function BuilderPanel({
               <option value="strict">Строгая</option>
             </select>
           </div>
+          <SkillCheckboxGroup skills={skills} selectedIds={[]} />
           <textarea name="question" placeholder="Первый вопрос" rows={3} required />
           <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии проверки" rows={4} />
           <button className="primary" type="submit"><Plus size={17} /> Создать</button>
@@ -1815,6 +1946,7 @@ function BuilderPanel({
                 <option value="test_only">Материалы только на тест</option>
                 <option value="test_and_question">Материалы на тест и вопросы</option>
               </select>
+              <SkillCheckboxGroup skills={skills} selectedIds={selectedSkillIds} />
               <input
                 name="time_limit_seconds"
                 type="number"
@@ -1852,8 +1984,114 @@ function BuilderPanel({
           <EmptyState title="Выберите сценарий" text="После выбора можно менять статус, лимит времени и вопросы." />
         )}
       </section>
+
+      <AISkillsPanel
+        skills={skills}
+        onCreate={onCreateSkill}
+        onUpload={onUploadSkill}
+        onUpdate={onUpdateSkill}
+        onDelete={onDeleteSkill}
+      />
     </section>
   );
+}
+
+function SkillCheckboxGroup({ skills, selectedIds }: { skills: AISkill[]; selectedIds: string[] }) {
+  const activeSkills = skills.filter((skill) => skill.is_active);
+  return (
+    <fieldset className="skill-picker">
+      <legend>AI-скиллы проверки</legend>
+      {activeSkills.length ? (
+        activeSkills.map((skill) => (
+          <label key={skill.id}>
+            <input name="skill_ids" type="checkbox" value={skill.id} defaultChecked={selectedIds.includes(skill.id)} />
+            <span>
+              <strong>{skill.name}</strong>
+              <small>{skill.description || "Дополнительная инструкция для оценки ответа"}</small>
+            </span>
+          </label>
+        ))
+      ) : (
+        <p className="muted">Создайте или загрузите скилл ниже, чтобы привязать его к тесту.</p>
+      )}
+    </fieldset>
+  );
+}
+
+function AISkillsPanel({
+  skills,
+  onCreate,
+  onUpload,
+  onUpdate,
+  onDelete
+}: {
+  skills: AISkill[];
+  onCreate: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpload: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdate: (skill: AISkill, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onDelete: (skill: AISkill) => Promise<void>;
+}) {
+  return (
+    <section className="panel ai-skills-panel">
+      <div className="panel-title"><FileText size={18} /> AI-скиллы методиста</div>
+      <form onSubmit={onCreate} className="stack compact">
+        <input name="name" placeholder="Название скилла" required minLength={2} />
+        <input name="description" placeholder="Кратко: что меняет этот скилл" />
+        <textarea
+          name="content"
+          placeholder="Инструкция для проверки: на что обращать внимание, как снижать баллы, какой стиль обратной связи использовать"
+          rows={5}
+          required
+          minLength={20}
+        />
+        <button className="primary" type="submit"><Plus size={17} /> Создать скилл</button>
+      </form>
+
+      <form onSubmit={onUpload} className="skill-upload-form">
+        <input name="name" placeholder="Название из файла" />
+        <input name="description" placeholder="Описание" />
+        <input name="file" type="file" accept=".txt,.md,text/plain,text/markdown" required />
+        <button className="secondary" type="submit"><Upload size={17} /> Загрузить файл</button>
+      </form>
+
+      <div className="skill-list">
+        {skills.map((skill) => (
+          <form key={skill.id} onSubmit={(event) => onUpdate(skill, event)} className="skill-card">
+            <div className="skill-card-head">
+              <span>
+                <strong>{skill.name}</strong>
+                <small>{skill.source_filename || new Date(skill.updated_at).toLocaleString("ru-RU")}</small>
+              </span>
+              <label className="inline-check"><input name="is_active" type="checkbox" defaultChecked={skill.is_active} /> Активен</label>
+            </div>
+            <input name="name" defaultValue={skill.name} required minLength={2} />
+            <input name="description" defaultValue={skill.description} placeholder="Описание" />
+            <textarea name="content" defaultValue={skill.content} rows={5} required minLength={20} />
+            <div className="admin-actions">
+              <button className="secondary" type="submit"><CheckCircle2 size={15} /> Сохранить</button>
+              <button
+                className="danger"
+                type="button"
+                onClick={() => {
+                  if (window.confirm("Удалить AI-скилл? Тесты, где он был выбран, перестанут применять эту инструкцию.")) {
+                    onDelete(skill);
+                  }
+                }}
+              >
+                <Trash2 size={15} /> Удалить
+              </button>
+            </div>
+          </form>
+        ))}
+        {!skills.length && <p className="muted">Пока нет AI-скиллов. Можно создать текстом или загрузить Markdown/TXT файл.</p>}
+      </div>
+    </section>
+  );
+}
+
+function getSkillIds(test: Test) {
+  const raw = test.criteria?.skill_ids;
+  return Array.isArray(raw) ? raw.map((item) => String(item)).filter(Boolean) : [];
 }
 
 function MaterialsAccessPanel({

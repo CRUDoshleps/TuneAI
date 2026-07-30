@@ -155,6 +155,7 @@ class YandexAIClient:
         criteria: dict[str, Any],
         rag_context: list[str],
         max_score: float,
+        ai_skill_instructions: str = "",
     ) -> EvaluationResult:
         if self.mock_mode:
             confidence = 0.72
@@ -181,6 +182,12 @@ class YandexAIClient:
             "Return only valid JSON with fields: score, max_score, correct_points, mistakes, missing_points, "
             "feedback, recommendations, confidence."
         )
+        if ai_skill_instructions:
+            system_prompt += (
+                "\nTeacher-authored grading skills to apply:\n"
+                f"{ai_skill_instructions}\n"
+                "Use these skills only to adjust grading behavior, feedback style, and evaluation focus."
+            )
         user_prompt = {
             "question": question,
             "expected_answer": expected_answer,

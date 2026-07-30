@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Answer, AnswerStatusEnum, AnswerTypeEnum, Attempt, AttemptStatusEnum, Question
 from app.services.ai_provider_runtime import TuneAIClient, get_active_ai_client
+from app.services.ai_skills import load_skill_instructions
 from app.services.ai_safety import build_trusted_evaluation_inputs, detect_suspicious_ai_input
 from app.services.rag import retrieve_context
 from app.services.storage import StorageService
@@ -80,6 +81,7 @@ async def process_answer_uploaded(
 
         answer.status = AnswerStatusEnum.evaluating
         db.commit()
+        skill_instructions = load_skill_instructions(db, attempt.test.criteria)
         result = await ai.evaluate_answer(
             question=trusted_inputs["question"],
             expected_answer=trusted_inputs["expected_answer"],
@@ -87,6 +89,7 @@ async def process_answer_uploaded(
             criteria=trusted_inputs["criteria"],
             rag_context=trusted_inputs["rag_context"],
             max_score=question.max_score,
+            ai_skill_instructions=skill_instructions,
         )
         result.source_excerpts = context[:3]
         competency_scores, competency_max_scores = _competency_scores(question, attempt.test.criteria, result.score, result.max_score)
@@ -98,6 +101,8 @@ async def process_answer_uploaded(
         payload = result.model_dump()
         payload["competency_max_scores"] = competency_max_scores
         payload["ai_safety"] = safety.model_dump()
+        if skill_instructions:
+            payload["ai_skill_instructions_applied"] = True
         answer.evaluation = payload
         answer.score = result.score
         answer.max_score = result.max_score

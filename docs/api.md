@@ -78,6 +78,18 @@ DELETE /admin/ai-providers/{provider_id}
 
 Endpoints доступны только администратору. Секреты принимаются в `credentials`, но в read-ответах возвращаются только как `credentials_masked`. Поддерживаются провайдеры `mock`, `yandex`, `openai_compatible` и `local`.
 
+## AI Skills
+
+```text
+GET /skills
+POST /skills
+POST /skills/upload
+PATCH /skills/{skill_id}
+DELETE /skills/{skill_id}
+```
+
+Endpoints доступны ролям, которые могут создавать тесты. Методист или преподаватель создает скилл, а затем привязывает его к тесту через `criteria.skill_ids`.
+
 ## Demo Bootstrap
 
 ```text

@@ -127,6 +127,20 @@ class Test(Base):
     materials: Mapped[list["Material"]] = relationship(back_populates="test", cascade="all, delete-orphan")
 
 
+class AISkill(Base):
+    __tablename__ = "ai_skills"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class Question(Base):
     __tablename__ = "questions"
     __table_args__ = (UniqueConstraint("test_id", "order_index", name="uq_question_order_per_test"),)

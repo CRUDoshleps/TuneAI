@@ -96,6 +96,18 @@ export type Test = {
   questions: Question[];
 };
 
+export type AISkill = {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  source_filename: string | null;
+  owner_id: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Answer = {
   id: string;
   question_id: string;
@@ -284,6 +296,13 @@ const detailMessages: Record<string, string> = {
   "Material not found": "Материал не найден или уже удален.",
   "Target user not found": "Пользователь не найден.",
   "Only managed learner users can be assigned": "Назначать можно только учащихся, созданных в вашем контуре.",
+  "Only test creators can manage AI skills": "У вашей роли нет прав на управление AI-скиллами.",
+  "Only owner or admin can manage this AI skill": "Редактировать этот AI-скилл может только владелец или администратор.",
+  "AI skill not found": "AI-скилл не найден.",
+  "AI skill is not available for this test": "Этот AI-скилл недоступен для выбранного теста.",
+  "AI skill content is too short": "Описание AI-скилла слишком короткое.",
+  "Only text skill files are supported": "Загрузите AI-скилл в формате TXT или Markdown.",
+  "Skill file is too large": "Файл AI-скилла слишком большой. Используйте файл до 512 КБ.",
   "User is already assigned": "Пользователь уже назначен на этот тест.",
   "Only attempt owner can upload answers": "Ответ можно отправить только из своей попытки.",
   "Question not found in this test": "Вопрос не найден в этом тесте.",

@@ -141,6 +141,34 @@ class TestRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AISkillCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    content: str = Field(min_length=20, max_length=50000)
+    is_active: bool = True
+
+
+class AISkillUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+    content: str | None = Field(default=None, min_length=20, max_length=50000)
+    is_active: bool | None = None
+
+
+class AISkillRead(BaseModel):
+    id: str
+    name: str
+    description: str
+    content: str
+    source_filename: str | None = None
+    owner_id: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class AssignRequest(BaseModel):
     user_id: str
 
