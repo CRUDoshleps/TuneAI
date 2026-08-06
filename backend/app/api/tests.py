@@ -5,11 +5,30 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.deps import can_create_tests, get_current_user
-from app.models import AISkill, Answer, Assignment, Attempt, Material, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
-from app.schemas import AssignRequest, QuestionCreate, QuestionRead, QuestionReorderRequest, QuestionUpdate, TestCreate, TestRead, TestUpdate
+from app.models import AISkill, Answer, Assignment, Attempt, Group, GroupMembership, Material, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
+from app.schemas import (
+    AssignRequest,
+    CalibrationPreviewRead,
+    CalibrationPreviewRequest,
+    CalibrationPreviewItem,
+    GroupAssignRead,
+    GroupAssignRequest,
+    QuestionCreate,
+    QuestionGenerationRead,
+    QuestionGenerationRequest,
+    QuestionRead,
+    QuestionReorderRequest,
+    QuestionUpdate,
+    TestCreate,
+    TestRead,
+    TestUpdate,
+)
 from app.services.moderation import censor_content, censor_text
 from app.services.access_control import can_manage_test, can_view_test
-from app.services.ai_skills import skill_ids_from_criteria
+from app.services.ai_provider_runtime import get_active_ai_client
+from app.services.ai_skills import load_skill_instructions, skill_ids_from_criteria
+from app.services.question_generation import generate_questions_from_rag
+from app.services.rag import retrieve_context
 
 
 router = APIRouter(prefix="/tests", tags=["tests"])
@@ -54,6 +73,7 @@ def create_test(
                 text=censor_text(question.text),
                 expected_answer=censor_text(question.expected_answer),
                 competencies=[item.model_dump() for item in question.competencies],
+                answer_mode=question.answer_mode,
                 order_index=question.order_index,
                 max_score=question.max_score,
             )
@@ -110,6 +130,7 @@ def add_question(
         text=censor_text(payload.text),
         expected_answer=censor_text(payload.expected_answer),
         competencies=[item.model_dump() for item in payload.competencies],
+        answer_mode=payload.answer_mode,
         order_index=payload.order_index,
         max_score=payload.max_score,
     )
@@ -213,6 +234,120 @@ def assign_test(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already assigned") from None
 
 
+@router.post("/{test_id}/assign-group", response_model=GroupAssignRead)
+def assign_test_group(
+    test_id: str,
+    payload: GroupAssignRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GroupAssignRead:
+    test = _load_test(db, test_id)
+    _ensure_manager(test, user)
+    group = db.scalar(select(Group).where(Group.id == payload.group_id))
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+    if user.role != RoleEnum.admin and group.created_by_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managed groups can be assigned")
+    member_ids = list(db.scalars(select(GroupMembership.user_id).where(GroupMembership.group_id == group.id)).all())
+    if not member_ids:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Group has no members")
+    existing_ids = set(db.scalars(select(Assignment.user_id).where(Assignment.test_id == test.id, Assignment.user_id.in_(member_ids))).all())
+    assigned_count = 0
+    for member_id in member_ids:
+        if member_id in existing_ids:
+            continue
+        db.add(Assignment(test_id=test.id, user_id=member_id, created_by_id=user.id))
+        assigned_count += 1
+    db.commit()
+    return GroupAssignRead(
+        group_id=group.id,
+        test_id=test.id,
+        assigned_count=assigned_count,
+        skipped_count=len(member_ids) - assigned_count,
+    )
+
+
+@router.post("/{test_id}/generate-questions", response_model=QuestionGenerationRead)
+def generate_questions(
+    test_id: str,
+    payload: QuestionGenerationRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> QuestionGenerationRead:
+    test = _load_test(db, test_id)
+    _ensure_manager(test, user)
+    if payload.question_id:
+        question = db.get(Question, payload.question_id)
+        if not question or question.test_id != test.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    return generate_questions_from_rag(db, test=test, payload=payload, created_by_id=user.id)
+
+
+@router.post("/{test_id}/calibration-preview", response_model=CalibrationPreviewRead)
+async def calibration_preview(
+    test_id: str,
+    payload: CalibrationPreviewRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CalibrationPreviewRead:
+    test = _load_test(db, test_id)
+    _ensure_manager(test, user)
+    question = _calibration_question(db, test, payload.question_id)
+    criteria = dict(test.criteria or {})
+    if payload.skill_id:
+        criteria["skill_ids"] = [payload.skill_id]
+    criteria = _validated_criteria(db, criteria, user)
+    material_policy = str(criteria.get("material_policy") or "test_and_question")
+    ai = get_active_ai_client(db)
+    skill_instructions = load_skill_instructions(db, criteria)
+    context_cache: dict[str, list[str]] = {}
+    items: list[CalibrationPreviewItem] = []
+    for example in payload.examples:
+        context_key = f"{question.id}:{material_policy}"
+        if context_key not in context_cache:
+            context_cache[context_key] = await retrieve_context(
+                db,
+                test_id=test.id,
+                question_id=question.id,
+                query=f"{question.text}\n{example.answer}",
+                limit=4,
+                material_policy=material_policy,
+                ai=ai,
+            )
+        context = context_cache[context_key]
+        result = await ai.evaluate_answer(
+            question=question.text,
+            expected_answer=question.expected_answer,
+            transcript=example.answer,
+            criteria=criteria,
+            rag_context=context,
+            max_score=question.max_score,
+            ai_skill_instructions=skill_instructions,
+        )
+        manual_reason = None
+        threshold = _skill_threshold(db, payload.skill_id, float(criteria.get("review_confidence_threshold") or 0.78))
+        if result.confidence < threshold:
+            manual_reason = f"confidence {result.confidence:.2f} below threshold {threshold:.2f}"
+        items.append(
+            CalibrationPreviewItem(
+                label=example.label,
+                score=result.score,
+                max_score=result.max_score,
+                confidence=result.confidence,
+                feedback=result.feedback,
+                source_excerpts=context[:3],
+                manual_review_reason=manual_reason,
+            )
+        )
+    return CalibrationPreviewRead(
+        skill_id=payload.skill_id,
+        material_policy=material_policy,
+        items=items,
+        token_budget_estimate=sum(len(example.answer) // 4 for example in payload.examples) + sum(len(item) // 4 for item in context_cache.get(f"{question.id}:{material_policy}", [])),
+        reused_rag_context=True,
+    )
+
+
 @router.delete("/{test_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_test(
     test_id: str,
@@ -274,6 +409,24 @@ def _validated_criteria(db: Session, criteria: dict, user: User) -> dict:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AI skill is not available for this test")
     payload["skill_ids"] = skill_ids
     return payload
+
+
+def _calibration_question(db: Session, test: Test, question_id: str | None) -> Question:
+    if question_id:
+        question = db.get(Question, question_id)
+        if question and question.test_id == test.id:
+            return question
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    if test.questions:
+        return sorted(test.questions, key=lambda item: item.order_index)[0]
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Test does not contain questions")
+
+
+def _skill_threshold(db: Session, skill_id: str | None, fallback: float) -> float:
+    if not skill_id:
+        return fallback
+    skill = db.get(AISkill, skill_id)
+    return skill.confidence_threshold if skill else fallback
 
 
 def _ensure_manager(test: Test, user: User) -> None:

@@ -137,7 +137,7 @@ async def test_audio_upload_creates_outbox_event_and_processing_completes(client
         },
     )
     assert material.status_code == 201, material.text
-    assert material.json()["index_status"] == "pending"
+    assert material.json()["index_status"] == "uploaded"
     await index_test_materials(test["id"])
 
     attempt_response = client.post(
@@ -338,6 +338,99 @@ def test_questions_are_hidden_until_attempt_reveals_them(client):
     )
     assert replay.status_code == 201
     assert replay.json()["answers"][0]["id"] == first_upload.json()["answers"][0]["id"]
+
+
+def test_question_answer_modes_control_text_and_audio_submission(client):
+    admin_token = register_and_login(client, "admin@example.com")
+    created = client.post(
+        "/tests",
+        headers=auth_header(admin_token),
+        json={
+            "title": "Mixed answer modes exam",
+            "description": "Each question defines the allowed answer format.",
+            "test_type": "self_training",
+            "questions": [
+                {
+                    "text": "Answer this question by voice only.",
+                    "expected_answer": "Voice answer.",
+                    "answer_mode": "audio",
+                    "order_index": 0,
+                    "max_score": 10,
+                },
+                {
+                    "text": "Answer this question as written text only.",
+                    "expected_answer": "Written answer.",
+                    "answer_mode": "text",
+                    "order_index": 1,
+                    "max_score": 10,
+                },
+                {
+                    "text": "Answer this question using either text or voice.",
+                    "expected_answer": "Flexible answer.",
+                    "answer_mode": "both",
+                    "order_index": 2,
+                    "max_score": 10,
+                },
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    test = created.json()
+    assert [question["answer_mode"] for question in test["questions"]] == ["audio", "text", "both"]
+
+    published = client.patch(f"/tests/{test['id']}", headers=auth_header(admin_token), json={"status": "published"})
+    assert published.status_code == 200, published.text
+    attempt_response = client.post("/attempts", headers=auth_header(admin_token), json={"test_id": test["id"]})
+    assert attempt_response.status_code == 201, attempt_response.text
+    attempt = attempt_response.json()
+    assert [question["answer_mode"] for question in attempt["questions"]] == ["audio", "text", "both"]
+
+    audio_only_id = test["questions"][0]["id"]
+    text_only_id = test["questions"][1]["id"]
+    flexible_id = test["questions"][2]["id"]
+
+    blocked_text = client.post(
+        f"/attempts/{attempt['id']}/questions/{audio_only_id}/text",
+        headers=auth_header(admin_token),
+        json={"text": "Trying to submit text."},
+    )
+    assert blocked_text.status_code == 403
+    assert blocked_text.json()["detail"] == "Text answers are disabled for this question"
+
+    allowed_audio = client.post(
+        f"/attempts/{attempt['id']}/questions/{audio_only_id}/audio",
+        headers=auth_header(admin_token),
+        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+    )
+    assert allowed_audio.status_code == 201, allowed_audio.text
+    answers_by_question = {answer["question_id"]: answer for answer in allowed_audio.json()["answers"]}
+    assert answers_by_question[audio_only_id]["answer_type"] == "audio"
+
+    blocked_audio = client.post(
+        f"/attempts/{attempt['id']}/questions/{text_only_id}/audio",
+        headers=auth_header(admin_token),
+        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+    )
+    assert blocked_audio.status_code == 403
+    assert blocked_audio.json()["detail"] == "Audio answers are disabled for this question"
+
+    allowed_text = client.post(
+        f"/attempts/{attempt['id']}/questions/{text_only_id}/text",
+        headers=auth_header(admin_token),
+        json={"text": "Submitting the required written answer."},
+    )
+    assert allowed_text.status_code == 201, allowed_text.text
+    answers_by_question = {answer["question_id"]: answer for answer in allowed_text.json()["answers"]}
+    assert answers_by_question[text_only_id]["answer_type"] == "text"
+
+    flexible_text = client.post(
+        f"/attempts/{attempt['id']}/questions/{flexible_id}/text",
+        headers=auth_header(admin_token),
+        json={"text": "This mode accepts text too."},
+    )
+    assert flexible_text.status_code == 201, flexible_text.text
+    answers_by_question = {answer["question_id"]: answer for answer in flexible_text.json()["answers"]}
+    assert answers_by_question[flexible_id]["answer_type"] == "text"
 
 
 def test_student_does_not_see_unassigned_published_self_training(client):

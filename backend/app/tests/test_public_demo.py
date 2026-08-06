@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import json
 
 from app.db.session import SessionLocal
 from app.models import OutboxEvent, Test as DbTest, User
@@ -21,6 +22,60 @@ def test_public_config_uses_runtime_environment(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["config"]["productName"] == "Campus Oral AI"
     assert response.json()["config"]["consultationEmail"] == "help@example.com"
+
+
+def test_public_config_ignores_blank_runtime_brand_values(client, monkeypatch):
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_PRODUCT_NAME", "")
+    monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_LOGO_TEXT", "")
+    monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_LOGO_URL", "")
+    try:
+        response = client.get("/public/config")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()["config"]
+    assert payload["productName"] == "Self-host Test Platform"
+    assert payload["logoText"] == "Demo"
+    assert payload["logoUrl"] is None
+
+
+def test_public_config_exposes_brand_theme_from_env_and_json(client, monkeypatch):
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_ACCENT_COLOR", "#1fbf75")
+    monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_BACKGROUND_COLOR", "#f7fbf2")
+    monkeypatch.setenv(
+        "NEXT_PUBLIC_TUNEAI_CONFIG_JSON",
+        json.dumps(
+            {
+                "productName": "Faculty Trainer",
+                "theme": {
+                    "accent": "#ff0000",
+                    "panel": "#ffffff",
+                    "line": "#c7d8c2",
+                },
+            }
+        ),
+    )
+    try:
+        response = client.get("/public/config")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()["config"]
+    assert payload["productName"] == "Faculty Trainer"
+    assert payload["theme"] == {
+        "accent": "#1fbf75",
+        "background": "#f7fbf2",
+        "panel": "#ffffff",
+        "line": "#c7d8c2",
+    }
 
 
 def test_demo_bootstrap_creates_assigned_exam_for_examinee(client):

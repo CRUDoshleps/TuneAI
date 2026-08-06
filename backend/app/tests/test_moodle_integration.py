@@ -183,6 +183,74 @@ def test_moodle_manifest_filters_published_tests_by_methodist(client, monkeypatc
     assert [test["id"] for test in body["tests"]] == [first_test["id"]]
     assert body["tests"][0]["owner_email"] == "methodist.one@example.edu"
     assert body["tests"][0]["questions"][0]["id"] == first_test["questions"][0]["id"]
+    assert body["tests"][0]["questions"][0]["answer_mode"] == "both"
+
+
+def test_moodle_submission_respects_question_answer_mode(client, monkeypatch):
+    headers = _enable_moodle(monkeypatch)
+    admin_token = register_and_login(client, "admin@example.com")
+    created = client.post(
+        "/tests",
+        headers=auth_header(admin_token),
+        json={
+            "title": "Moodle mixed modes",
+            "test_type": "exam",
+            "questions": [
+                {
+                    "text": "Voice-only Moodle question?",
+                    "expected_answer": "Audio answer.",
+                    "answer_mode": "audio",
+                    "order_index": 0,
+                    "max_score": 10,
+                },
+                {
+                    "text": "Text-only Moodle question?",
+                    "expected_answer": "Text answer.",
+                    "answer_mode": "text",
+                    "order_index": 1,
+                    "max_score": 10,
+                },
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    published = client.patch(f"/tests/{created.json()['id']}", headers=auth_header(admin_token), json={"status": "published"})
+    assert published.status_code == 200, published.text
+    test = published.json()
+
+    blocked_text = client.post(
+        "/integrations/moodle/submissions/text",
+        headers=headers,
+        json={
+            "external_submission_id": "moodle-mode-text-blocked",
+            "moodle_user_id": "42",
+            "user_email": "student42@example.edu",
+            "user_full_name": "Moodle Student",
+            "methodist_email": "admin@example.com",
+            "test_id": test["id"],
+            "question_id": test["questions"][0]["id"],
+            "text": "Trying text for an audio question.",
+        },
+    )
+    assert blocked_text.status_code == 403
+    assert blocked_text.json()["detail"] == "Text answers are disabled for this question"
+
+    blocked_audio = client.post(
+        "/integrations/moodle/submissions/audio",
+        headers=headers,
+        data={
+            "external_submission_id": "moodle-mode-audio-blocked",
+            "moodle_user_id": "43",
+            "methodist_email": "admin@example.com",
+            "user_email": "student43@example.edu",
+            "user_full_name": "Moodle Student",
+            "test_id": test["id"],
+            "question_id": test["questions"][1]["id"],
+        },
+        files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
+    )
+    assert blocked_audio.status_code == 403
+    assert blocked_audio.json()["detail"] == "Audio answers are disabled for this question"
 
 
 def test_moodle_submission_rejects_wrong_methodist_scope(client, monkeypatch):

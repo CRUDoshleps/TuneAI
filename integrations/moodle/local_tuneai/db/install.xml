@@ -43,6 +43,9 @@
         <FIELD NAME="grade" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="false"/>
         <FIELD NAME="teacher_signal" TYPE="char" LENGTH="64" NOTNULL="false"/>
         <FIELD NAME="feedback" TYPE="text" NOTNULL="false"/>
+        <FIELD NAME="sync_attempts" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="next_sync_time" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="last_error" TYPE="text" NOTNULL="false"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true"/>
       </FIELDS>
@@ -53,6 +56,7 @@
         <INDEX NAME="external_submission_id" UNIQUE="true" FIELDS="external_submission_id"/>
         <INDEX NAME="course_cmid_user" UNIQUE="false" FIELDS="courseid, cmid, userid"/>
         <INDEX NAME="result_ready" UNIQUE="false" FIELDS="result_ready"/>
+        <INDEX NAME="next_sync_time" UNIQUE="false" FIELDS="next_sync_time"/>
       </INDEXES>
     </TABLE>
   </TABLES>

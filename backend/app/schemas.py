@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from app.models import AIProviderEnum, AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, MaterialIndexStatusEnum, RoleEnum, TestStatusEnum, TestTypeEnum
+from app.models import AIProviderEnum, AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, MaterialIndexStatusEnum, MaterialScopeEnum, QuestionAnswerModeEnum, RoleEnum, TestStatusEnum, TestTypeEnum
 
 
 class TokenPair(BaseModel):
@@ -27,12 +27,23 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str = Field(min_length=24, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+
+
 class UserRead(BaseModel):
     id: str
     email: EmailStr
     full_name: str
     role: RoleEnum
     is_active: bool
+    must_change_password: bool = False
     is_demo: bool = False
     expires_at: datetime | None = None
     created_by_id: str | None = None
@@ -55,6 +66,44 @@ class UserCreateStaff(BaseModel):
     role: RoleEnum = RoleEnum.student
 
 
+class UserProvisionCreate(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=2, max_length=255)
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+    role: RoleEnum = RoleEnum.examinee
+
+
+class UserBatchCreate(BaseModel):
+    users: list[UserProvisionCreate] = Field(min_length=1, max_length=200)
+
+
+class UserProvisionRead(BaseModel):
+    user: UserRead
+    password: str
+
+
+class UserInviteCreate(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=2, max_length=255)
+    role: RoleEnum = RoleEnum.examinee
+    expires_in_days: int = Field(default=7, ge=1, le=90)
+
+
+class UserInviteRead(BaseModel):
+    id: str
+    email: EmailStr
+    full_name: str
+    role: RoleEnum
+    invite_url: str
+    expires_at: datetime
+    accepted_at: datetime | None = None
+
+
+class PasswordResetRead(BaseModel):
+    user: UserRead
+    temporary_password: str
+
+
 class UserRoleUpdate(BaseModel):
     role: RoleEnum
     is_active: bool | None = None
@@ -65,10 +114,22 @@ class QuestionCompetency(BaseModel):
     weight: float = Field(default=1, gt=0)
 
 
+class RubricCriterion(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    weight: float = Field(default=1, gt=0)
+
+
+class SkillOutputConfig(BaseModel):
+    require_sources: bool = True
+    require_recommendations: bool = True
+    require_manual_review_reason: bool = True
+
+
 class QuestionCreate(BaseModel):
     text: str = Field(min_length=5)
     expected_answer: str = ""
     competencies: list[QuestionCompetency] = []
+    answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
     order_index: int = 0
     max_score: float = Field(default=10, gt=0)
 
@@ -77,6 +138,7 @@ class QuestionUpdate(BaseModel):
     text: str | None = Field(default=None, min_length=5)
     expected_answer: str | None = None
     competencies: list[QuestionCompetency] | None = None
+    answer_mode: QuestionAnswerModeEnum | None = None
     order_index: int | None = None
     max_score: float | None = Field(default=None, gt=0)
 
@@ -90,6 +152,7 @@ class QuestionRead(BaseModel):
     text: str
     expected_answer: str
     competencies: list[QuestionCompetency] = []
+    answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
     order_index: int
     max_score: float
 
@@ -100,6 +163,7 @@ class AttemptQuestionRead(BaseModel):
     id: str
     text: str
     competencies: list[QuestionCompetency] = []
+    answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
     order_index: int
     max_score: float
 
@@ -145,6 +209,15 @@ class AISkillCreate(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     description: str = Field(default="", max_length=2000)
     content: str = Field(min_length=20, max_length=50000)
+    scenario: Literal["exam", "self_training", "interview"] = "exam"
+    language: str = Field(default="ru", min_length=2, max_length=16)
+    strictness: Literal["soft", "balanced", "strict"] = "balanced"
+    score_scale: float = Field(default=10, gt=0, le=100)
+    confidence_threshold: float = Field(default=0.78, ge=0, le=1)
+    material_policy: Literal["test_and_question", "question_only", "course_library", "organization_library", "none"] = "test_and_question"
+    rubric: list[RubricCriterion] = Field(default_factory=list)
+    instructions: list[str] = Field(default_factory=list, max_length=20)
+    output: SkillOutputConfig = Field(default_factory=SkillOutputConfig)
     is_active: bool = True
 
 
@@ -152,6 +225,15 @@ class AISkillUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=160)
     description: str | None = Field(default=None, max_length=2000)
     content: str | None = Field(default=None, min_length=20, max_length=50000)
+    scenario: Literal["exam", "self_training", "interview"] | None = None
+    language: str | None = Field(default=None, min_length=2, max_length=16)
+    strictness: Literal["soft", "balanced", "strict"] | None = None
+    score_scale: float | None = Field(default=None, gt=0, le=100)
+    confidence_threshold: float | None = Field(default=None, ge=0, le=1)
+    material_policy: Literal["test_and_question", "question_only", "course_library", "organization_library", "none"] | None = None
+    rubric: list[RubricCriterion] | None = None
+    instructions: list[str] | None = Field(default=None, max_length=20)
+    output: SkillOutputConfig | None = None
     is_active: bool | None = None
 
 
@@ -160,6 +242,15 @@ class AISkillRead(BaseModel):
     name: str
     description: str
     content: str
+    scenario: str = "exam"
+    language: str = "ru"
+    strictness: str = "balanced"
+    score_scale: float = 10
+    confidence_threshold: float = 0.78
+    material_policy: str = "test_and_question"
+    rubric: list[RubricCriterion] = []
+    instructions: list[str] = []
+    output_config: dict[str, Any] = {}
     source_filename: str | None = None
     owner_id: str
     is_active: bool
@@ -171,6 +262,43 @@ class AISkillRead(BaseModel):
 
 class AssignRequest(BaseModel):
     user_id: str
+
+
+class GroupAssignRequest(BaseModel):
+    group_id: str
+
+
+class GroupAssignRead(BaseModel):
+    group_id: str
+    test_id: str
+    assigned_count: int
+    skipped_count: int
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    description: str = Field(default="", max_length=2000)
+
+
+class GroupMemberAdd(BaseModel):
+    user_id: str
+
+
+class GroupMemberRead(BaseModel):
+    id: str
+    email: EmailStr
+    full_name: str
+    role: RoleEnum
+    is_active: bool
+
+
+class GroupRead(BaseModel):
+    id: str
+    name: str
+    description: str
+    created_by_id: str
+    created_at: datetime
+    members: list[GroupMemberRead] = []
 
 
 class AttemptStartRequest(BaseModel):
@@ -364,23 +492,103 @@ class ReviewQueueItem(BaseModel):
 
 
 class MaterialCreate(BaseModel):
-    test_id: str
+    test_id: str | None = None
     question_id: str | None = None
+    organization_id: str | None = Field(default=None, max_length=120)
+    course_id: str | None = Field(default=None, max_length=120)
+    scope: MaterialScopeEnum = MaterialScopeEnum.test
     title: str = Field(min_length=3, max_length=255)
     content: str = Field(min_length=20, max_length=5 * 1024 * 1024)
+    content_type: str = Field(default="text/plain", max_length=128)
+    version: int = Field(default=1, gt=0)
+
+    @model_validator(mode="after")
+    def validate_scope_links(self) -> "MaterialCreate":
+        if self.scope in {MaterialScopeEnum.test, MaterialScopeEnum.question} and not self.test_id:
+            raise ValueError("test_id is required for test and question materials")
+        if self.scope == MaterialScopeEnum.question and not self.question_id:
+            raise ValueError("question_id is required for question materials")
+        if self.scope == MaterialScopeEnum.course and not self.course_id:
+            raise ValueError("course_id is required for course library materials")
+        if self.scope == MaterialScopeEnum.organization and not self.organization_id:
+            raise ValueError("organization_id is required for organization library materials")
+        return self
 
 
 class MaterialRead(BaseModel):
     id: str
-    test_id: str
+    organization_id: str | None = None
+    course_id: str | None = None
+    test_id: str | None = None
     question_id: str | None = None
     title: str
     source_filename: str | None = None
-    index_status: MaterialIndexStatusEnum = MaterialIndexStatusEnum.pending
+    content_type: str = "text/plain"
+    scope: MaterialScopeEnum = MaterialScopeEnum.test
+    version: int = 1
+    index_status: MaterialIndexStatusEnum = MaterialIndexStatusEnum.uploaded
     index_error: str | None = None
+    chunk_count: int = 0
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class GeneratedQuestionCandidate(BaseModel):
+    text: str
+    expected_answer: str = ""
+    competencies: list[QuestionCompetency] = []
+    answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
+    max_score: float = 10
+    source_excerpt: str = ""
+    novelty_score: float = 0
+    reused: bool = False
+
+
+class QuestionGenerationRequest(BaseModel):
+    count: int = Field(default=5, ge=1, le=20)
+    material_policy: Literal["test_and_question", "question_only", "course_library", "organization_library"] = "test_and_question"
+    question_id: str | None = None
+    reuse_existing: bool = True
+    max_context_chunks: int = Field(default=10, ge=1, le=40)
+    max_tokens_budget: int = Field(default=1400, ge=300, le=8000)
+
+
+class QuestionGenerationRead(BaseModel):
+    questions: list[GeneratedQuestionCandidate]
+    reused_count: int
+    source_chunk_count: int
+    token_budget_estimate: int
+    fingerprint: str
+
+
+class CalibrationExample(BaseModel):
+    label: str = Field(min_length=2, max_length=80)
+    answer: str = Field(min_length=1, max_length=20000)
+
+
+class CalibrationPreviewRequest(BaseModel):
+    skill_id: str | None = None
+    question_id: str | None = None
+    examples: list[CalibrationExample] = Field(min_length=1, max_length=5)
+
+
+class CalibrationPreviewItem(BaseModel):
+    label: str
+    score: float
+    max_score: float
+    confidence: float
+    feedback: str
+    source_excerpts: list[str] = []
+    manual_review_reason: str | None = None
+
+
+class CalibrationPreviewRead(BaseModel):
+    skill_id: str | None = None
+    material_policy: str
+    items: list[CalibrationPreviewItem]
+    token_budget_estimate: int
+    reused_rag_context: bool
 
 
 class MoodleTextSubmissionRequest(BaseModel):
@@ -429,6 +637,7 @@ class MoodleManifestQuestion(BaseModel):
     text: str
     order_index: int
     max_score: float
+    answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
     competencies: list[QuestionCompetency] = []
 
 
@@ -481,3 +690,14 @@ class AdminFailedJobRead(BaseModel):
     test_title: str | None = None
     error_message: str
     created_at: datetime | None = None
+
+
+class SystemHealthCheck(BaseModel):
+    name: str
+    status: Literal["ok", "warning", "error"]
+    detail: str
+
+
+class SystemHealthRead(BaseModel):
+    checks: list[SystemHealthCheck]
+    generated_at: datetime

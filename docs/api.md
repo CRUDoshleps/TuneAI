@@ -1,6 +1,6 @@
 # API
 
-TuneAI предоставляет API приложения и стабильный контракт результата для интеграций.
+TuneAI предоставляет API для основного frontend, widget и внешних интеграций.
 
 ## Авторизация
 
@@ -32,6 +32,14 @@ GET /attempts/{attempt_id}/result
 
 Для владельца попытки в `questions` попадают только уже открытые вопросы. Это защищает следующие вопросы экзамена или интервью от утечки через API результата. Преподаватель, методист, интервьюер и администратор видят полную попытку в пределах своих прав.
 
+Вопросы в попытке содержат `answer_mode`.
+
+| Значение | Разрешенный ответ |
+| --- | --- |
+| `audio` | Только аудио |
+| `text` | Только текст |
+| `both` | Аудио или текст |
+
 ## Ответы
 
 Аудиоответ:
@@ -53,6 +61,10 @@ Header: Idempotency-Key: <client-generated-key>
 ```
 
 Текстовые ответы пропускают SpeechKit и сразу идут в RAG-поиск и AI-оценку.
+
+Если вопрос имеет `answer_mode=audio`, endpoint текстового ответа вернет `403` с `Text answers are disabled for this question`.
+
+Если вопрос имеет `answer_mode=text`, endpoint аудиоответа вернет `403` с `Audio answers are disabled for this question`.
 
 Повторная отправка ответа с тем же `Idempotency-Key` возвращает уже созданный answer/result, а не создает дубль. Если ответ на этот вопрос уже есть, но ключ другой или отсутствует, API возвращает конфликт.
 
@@ -89,6 +101,36 @@ DELETE /skills/{skill_id}
 ```
 
 Endpoints доступны ролям, которые могут создавать тесты. Методист или преподаватель создает скилл, а затем привязывает его к тесту через `criteria.skill_ids`.
+
+Скилл может задавать сценарий, язык, строгость, шкалу, порог ручной проверки, политику материалов, рубрику и дополнительные инструкции.
+
+## Assessment Builder
+
+```text
+POST /tests
+PATCH /tests/{test_id}
+POST /tests/{test_id}/questions
+PATCH /tests/{test_id}/questions/{question_id}
+POST /tests/{test_id}/generate-questions
+POST /tests/{test_id}/calibration-preview
+POST /tests/{test_id}/assign
+POST /tests/{test_id}/assign-group
+```
+
+`POST /tests/{test_id}/generate-questions` создает кандидатов вопросов из индексированных RAG-материалов. Ответ содержит вопросы, оценку новизны, фрагмент источника, расчетный token budget и признак reuse.
+
+`POST /tests/{test_id}/calibration-preview` прогоняет выбранный AI-скилл на примерах ответов до публикации теста. Это помогает преподавателю увидеть, как модель оценит сильный, средний и слабый ответ.
+
+## Материалы
+
+```text
+GET /materials
+POST /materials
+POST /materials/upload
+DELETE /materials/{material_id}
+```
+
+Материал может относиться к организации, курсу, тесту или вопросу. В проверку попадают только материалы со статусом `indexed`.
 
 ## Moodle
 

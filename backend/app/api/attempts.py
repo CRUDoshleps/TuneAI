@@ -13,6 +13,7 @@ from app.models import (
     AnswerTypeEnum,
     Attempt,
     Question,
+    QuestionAnswerModeEnum,
     RoleEnum,
     Test,
     User,
@@ -157,6 +158,8 @@ async def upload_answer_audio(
     question = db.get(Question, question_id)
     if not question or question.test_id != attempt.test_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    if question.answer_mode == QuestionAnswerModeEnum.text:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Audio answers are disabled for this question")
     existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
     if existing and idempotency_key and existing.idempotency_key == idempotency_key:
         return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
@@ -208,6 +211,8 @@ async def submit_text_answer(
     question = db.get(Question, question_id)
     if not question or question.test_id != attempt.test_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    if question.answer_mode == QuestionAnswerModeEnum.audio:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Text answers are disabled for this question")
     existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
     if existing and idempotency_key and existing.idempotency_key == idempotency_key:
         return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
@@ -365,6 +370,7 @@ def _serialize_attempt(db: Session, attempt: Attempt, user: User) -> AttemptRead
                 id=question.id,
                 text=question.text,
                 competencies=question.competencies or [],
+                answer_mode=question.answer_mode,
                 order_index=question.order_index,
                 max_score=question.max_score,
             )
@@ -417,6 +423,7 @@ def _serialize_attempt_result(db: Session, attempt: Attempt, user: User) -> Atte
                 id=question.id,
                 text=question.text,
                 competencies=question.competencies or [],
+                answer_mode=question.answer_mode,
                 order_index=question.order_index,
                 max_score=question.max_score,
             )

@@ -22,24 +22,66 @@ router = APIRouter(prefix="/public", tags=["public"])
 @router.get("/config", response_model=PublicConfigRead)
 def public_config() -> PublicConfigRead:
     settings = get_settings()
+    template = _public_value(settings.tuneai_template, "unconfigured")
+    product_fallback = "TuneAI" if template == "official" else "Self-host Test Platform"
+    logo_fallback = "TuneAI" if template == "official" else "Demo"
+    env_theme = _public_theme(settings)
     config: dict[str, Any] = {
-        "template": settings.tuneai_template,
-        "productName": settings.tuneai_product_name,
-        "logoText": settings.tuneai_logo_text,
-        "logoUrl": settings.tuneai_logo_url,
-        "repositoryUrl": settings.tuneai_repository_url,
-        "docsUrl": settings.tuneai_docs_url,
-        "consultationEmail": settings.tuneai_consultation_email,
-        "consultationPerson": settings.tuneai_consultation_person,
+        "template": template,
+        "productName": _public_value(settings.tuneai_product_name, product_fallback),
+        "logoText": _public_value(settings.tuneai_logo_text, logo_fallback),
+        "logoUrl": _public_optional_value(settings.tuneai_logo_url),
+        "repositoryUrl": _public_value(settings.tuneai_repository_url, "https://github.com/CRUDoshleps/TuneAI"),
+        "docsUrl": _public_value(settings.tuneai_docs_url, "https://github.com/CRUDoshleps/TuneAI"),
+        "consultationEmail": _public_value(settings.tuneai_consultation_email, "admin@example.com"),
+        "consultationPerson": _public_value(settings.tuneai_consultation_person, "Implementation owner"),
     }
+    if env_theme:
+        config["theme"] = env_theme
     if settings.tuneai_config_json:
         try:
             loaded = json.loads(settings.tuneai_config_json)
             if isinstance(loaded, dict):
                 config.update(loaded)
+                json_theme = loaded.get("theme")
+                if isinstance(json_theme, dict) or env_theme:
+                    config["theme"] = {
+                        **({key: value for key, value in json_theme.items() if isinstance(value, str) and value.strip()} if isinstance(json_theme, dict) else {}),
+                        **env_theme,
+                    }
         except json.JSONDecodeError:
             pass
     return PublicConfigRead(config=config)
+
+
+def _public_value(value: str | None, fallback: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return fallback
+
+
+def _public_optional_value(value: str | None) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _public_theme(settings: Any) -> dict[str, str]:
+    theme = {
+        "background": settings.tuneai_background_color,
+        "surface": settings.tuneai_surface_color,
+        "panel": settings.tuneai_panel_color,
+        "panelSoft": settings.tuneai_panel_soft_color,
+        "text": settings.tuneai_text_color,
+        "muted": settings.tuneai_muted_color,
+        "line": settings.tuneai_line_color,
+        "accent": settings.tuneai_accent_color,
+        "accentSoft": settings.tuneai_accent_soft_color,
+        "danger": settings.tuneai_danger_color,
+        "warning": settings.tuneai_warning_color,
+        "success": settings.tuneai_success_color,
+    }
+    return {key: value.strip() for key, value in theme.items() if isinstance(value, str) and value.strip()}
 
 
 @router.post("/demo/bootstrap", response_model=DemoBootstrapRead, status_code=status.HTTP_201_CREATED)

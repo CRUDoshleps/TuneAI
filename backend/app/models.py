@@ -69,10 +69,27 @@ class AnswerTypeEnum(str, enum.Enum):
     text = "text"
 
 
+class QuestionAnswerModeEnum(str, enum.Enum):
+    audio = "audio"
+    text = "text"
+    both = "both"
+
+
 class MaterialIndexStatusEnum(str, enum.Enum):
+    uploaded = "uploaded"
+    parsing = "parsing"
+    chunking = "chunking"
+    embedding = "embedding"
     pending = "pending"
     indexed = "indexed"
     failed = "failed"
+
+
+class MaterialScopeEnum(str, enum.Enum):
+    organization = "organization"
+    course = "course"
+    test = "test"
+    question = "question"
 
 
 class AIProviderEnum(str, enum.Enum):
@@ -97,6 +114,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[RoleEnum] = mapped_column(Enum(RoleEnum), default=RoleEnum.student, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -104,6 +122,22 @@ class User(Base):
 
     owned_tests: Mapped[list["Test"]] = relationship(back_populates="owner", foreign_keys="Test.owner_id")
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="user")
+    created_groups: Mapped[list["Group"]] = relationship(back_populates="created_by", foreign_keys="Group.created_by_id")
+
+
+class UserInvite(Base):
+    __tablename__ = "user_invites"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_user_invite_token_hash"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[RoleEnum] = mapped_column(Enum(RoleEnum), default=RoleEnum.examinee, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class Test(Base):
@@ -134,6 +168,15 @@ class AISkill(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    scenario: Mapped[str] = mapped_column(String(32), default="exam", nullable=False)
+    language: Mapped[str] = mapped_column(String(16), default="ru", nullable=False)
+    strictness: Mapped[str] = mapped_column(String(32), default="balanced", nullable=False)
+    score_scale: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
+    confidence_threshold: Mapped[float] = mapped_column(Float, default=0.78, nullable=False)
+    material_policy: Mapped[str] = mapped_column(String(40), default="test_and_question", nullable=False)
+    rubric: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    instructions: Mapped[list[str]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    output_config: Mapped[dict[str, Any]] = mapped_column(MutableDict.as_mutable(json_type()), default=dict, nullable=False)
     source_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -150,6 +193,11 @@ class Question(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     expected_answer: Mapped[str] = mapped_column(Text, default="", nullable=False)
     competencies: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    answer_mode: Mapped[QuestionAnswerModeEnum] = mapped_column(
+        Enum(QuestionAnswerModeEnum),
+        default=QuestionAnswerModeEnum.both,
+        nullable=False,
+    )
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_score: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
 
@@ -171,6 +219,34 @@ class Assignment(Base):
     test: Mapped[Test] = relationship(back_populates="assignments", foreign_keys=[test_id])
     user: Mapped[User] = relationship(foreign_keys=[user_id])
     created_by: Mapped[User] = relationship(foreign_keys=[created_by_id])
+
+
+class Group(Base):
+    __tablename__ = "groups"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    created_by: Mapped[User] = relationship(back_populates="created_groups", foreign_keys=[created_by_id])
+    memberships: Mapped[list["GroupMembership"]] = relationship(back_populates="group", cascade="all, delete-orphan")
+
+
+class GroupMembership(Base):
+    __tablename__ = "group_memberships"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_membership_group_user"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    added_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    group: Mapped[Group] = relationship(back_populates="memberships", foreign_keys=[group_id])
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+    added_by: Mapped[User] = relationship(foreign_keys=[added_by_id])
 
 
 class Attempt(Base):
@@ -246,19 +322,25 @@ class Material(Base):
     __tablename__ = "materials"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False)
+    organization_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    course_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    test_id: Mapped[str | None] = mapped_column(ForeignKey("tests.id"), nullable=True)
     question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), nullable=True)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     source_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_type: Mapped[str] = mapped_column(String(128), default="text/plain", nullable=False)
+    scope: Mapped[MaterialScopeEnum] = mapped_column(Enum(MaterialScopeEnum), default=MaterialScopeEnum.test, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     index_status: Mapped[MaterialIndexStatusEnum] = mapped_column(
-        Enum(MaterialIndexStatusEnum), default=MaterialIndexStatusEnum.pending, nullable=False
+        Enum(MaterialIndexStatusEnum), default=MaterialIndexStatusEnum.uploaded, nullable=False
     )
     index_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
-    test: Mapped[Test] = relationship(back_populates="materials")
+    test: Mapped[Test | None] = relationship(back_populates="materials")
     question: Mapped[Question | None] = relationship(back_populates="materials")
     chunks: Mapped[list["MaterialChunk"]] = relationship(back_populates="material", cascade="all, delete-orphan")
 
@@ -268,13 +350,32 @@ class MaterialChunk(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     material_id: Mapped[str] = mapped_column(ForeignKey("materials.id"), nullable=False)
-    test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False, index=True)
+    organization_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    course_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    test_id: Mapped[str | None] = mapped_column(ForeignKey("tests.id"), nullable=True, index=True)
     question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), nullable=True, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
 
     material: Mapped[Material] = relationship(back_populates="chunks")
+
+
+class GeneratedQuestionCache(Base):
+    __tablename__ = "generated_question_cache"
+    __table_args__ = (UniqueConstraint("test_id", "fingerprint", name="uq_generated_question_cache_test_fingerprint"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False, index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy: Mapped[str] = mapped_column(String(40), nullable=False)
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_chunk_ids: Mapped[list[str]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    questions: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    token_budget_estimate: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reused_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class AIProviderConfig(Base):

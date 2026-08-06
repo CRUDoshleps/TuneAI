@@ -23,6 +23,12 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Run pytest
         run: pytest -q
+      - name: Run Alembic migrations
+        env:
+          DATABASE_URL: sqlite:////tmp/tuneai-ci-migrations.db
+          SECRET_KEY: ci-secret-key-for-migrations
+          UPLOAD_DIR: /tmp/tuneai-ci-uploads
+        run: alembic upgrade head
 
   frontend:
     name: Frontend tests, build and audit
@@ -62,3 +68,33 @@ jobs:
         run: docker system prune -af || true
       - name: Run Moodle integration smoke test
         run: tests/moodle/run-moodle-e2e.sh
+      - name: Package Moodle plugin
+        run: scripts/package-moodle-plugin.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local_tuneai
+          path: dist/local_tuneai.zip
+
+  self-host-config:
+    name: Self-host compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate Docker Compose files
+        env:
+          REGISTRY_IMAGE: ghcr.io/example/tuneai
+          IMAGE_TAG: ci
+          POSTGRES_HOST: postgres
+          POSTGRES_PASSWORD: ci-postgres-password
+          RABBITMQ_PASSWORD: ci-rabbitmq-password
+          MINIO_ROOT_PASSWORD: ci-minio-password
+          PUBLIC_ORIGIN: https://tuneai.example.edu
+          TUNEAI_DOMAIN: tuneai.example.edu
+          MOODLE_INTEGRATION_TOKEN: ci-moodle-token
+        run: |
+          cp .env.example .env
+          docker compose config >/tmp/tuneai-compose.yml
+          docker compose -f docker-compose.yml -f docker-compose.moodle.yml config >/tmp/tuneai-moodle-compose.yml
+          docker compose -f docker-compose.yml -f docker-compose.moodle.local.yml config >/tmp/tuneai-moodle-local-compose.yml
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/tmp/tuneai-prod-compose.yml
+          docker compose -f deploy/compose.yaml config >/tmp/tuneai-deploy-compose.yml

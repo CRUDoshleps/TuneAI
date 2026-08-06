@@ -37,6 +37,15 @@ def create_skill(
         name=censor_text(payload.name),
         description=censor_text(payload.description),
         content=_normalize_skill_content(payload.content),
+        scenario=payload.scenario,
+        language=payload.language,
+        strictness=payload.strictness,
+        score_scale=payload.score_scale,
+        confidence_threshold=payload.confidence_threshold,
+        material_policy=payload.material_policy,
+        rubric=[item.model_dump() for item in payload.rubric],
+        instructions=_normalize_instruction_list(payload.instructions),
+        output_config=payload.output.model_dump(),
         owner_id=user.id,
         is_active=payload.is_active,
     )
@@ -67,6 +76,12 @@ async def upload_skill(
         name=censor_text((name or filename).strip()),
         description=censor_text(description),
         content=_normalize_skill_content(text),
+        instructions=_normalize_instruction_list([text]),
+        output_config={
+            "require_sources": True,
+            "require_recommendations": True,
+            "require_manual_review_reason": True,
+        },
         source_filename=filename,
         owner_id=user.id,
         is_active=True,
@@ -90,6 +105,13 @@ def update_skill(
             value = censor_text(value)
         elif field == "content" and value is not None:
             value = _normalize_skill_content(value)
+        elif field == "instructions" and value is not None:
+            value = _normalize_instruction_list(value)
+        elif field == "rubric" and value is not None:
+            value = [dict(item) for item in value]
+        elif field == "output" and value is not None:
+            field = "output_config"
+            value = dict(value)
         setattr(skill, field, value)
     db.add(skill)
     db.commit()
@@ -128,3 +150,12 @@ def _normalize_skill_content(content: str) -> str:
     if len(text) < 20:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="AI skill content is too short")
     return censor_text(text[:50000])
+
+
+def _normalize_instruction_list(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for item in values:
+        text = censor_text(str(item).strip())
+        if text:
+            normalized.append(text[:1200])
+    return normalized[:20]

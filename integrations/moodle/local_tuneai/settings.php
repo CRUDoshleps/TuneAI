@@ -34,4 +34,11 @@ if ($hassiteconfig) {
         '20',
         PARAM_INT
     ));
+
+    $settings->add(new admin_setting_configcheckbox(
+        'local_tuneai/gradesync',
+        get_string('gradesync', 'local_tuneai'),
+        get_string('gradesync_desc', 'local_tuneai'),
+        1
+    ));
 }

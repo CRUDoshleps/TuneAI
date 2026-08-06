@@ -1,6 +1,6 @@
 # Интеграция с Moodle
 
-TuneAI предоставляет service API для Moodle-плагина или интеграционного скрипта на стороне Moodle.
+TuneAI предоставляет service API и Moodle local plugin для связки Moodle activity/question с TuneAI assessment.
 
 Moodle может:
 
@@ -12,9 +12,9 @@ Moodle может:
 
 ![Локальный Moodle-контейнер](screenshots/moodle-local-login.png)
 
-В текущем коде реализована backend-интеграция и Docker smoke-тест на реальном Moodle-контейнере. Готового Moodle plugin UI в репозитории пока нет: его нужно собрать поверх endpoints ниже.
+Пользователь не вводит логин и пароль TuneAI. Moodle уже знает участника курса, поэтому плагин отправляет в TuneAI Moodle identity: `moodle_user_id`, email, имя, course id, activity id и mapping на TuneAI test/question.
 
-В репозитории также есть заготовка Moodle local plugin: [integrations/moodle/local_tuneai](../integrations/moodle/local_tuneai). Ее можно положить в чужой Moodle как `local/tuneai` и использовать как основу для настройки mapping и отправки ответов.
+Плагин лежит в [integrations/moodle/local_tuneai](../integrations/moodle/local_tuneai). Его можно положить в чужой Moodle как `local/tuneai`.
 
 ## Включение
 
@@ -38,9 +38,11 @@ Service token хранится только на стороне Moodle или и
 1. Скопируйте каталог `integrations/moodle/local_tuneai` в Moodle как `local/tuneai`.
 2. Откройте админку Moodle и завершите установку local plugin.
 3. В настройках `Site administration -> Plugins -> Local plugins -> TuneAI integration` укажите:
+   - `Enable TuneAI`;
    - `TuneAI base URL`;
    - `TuneAI integration key`;
-   - `Enable TuneAI`.
+   - `Write grades to Moodle gradebook`;
+   - `Request timeout`.
 4. На стороне TuneAI включите:
 
 ```env
@@ -55,7 +57,10 @@ MOODLE_INTEGRATION_TOKEN=<same-service-token>
 - capabilities `local/tuneai:manage`, `local/tuneai:submit`, `local/tuneai:viewresults`;
 - `client.php` для вызова TuneAI;
 - `question_reader.php` для чтения Moodle `question_attempts`;
-- `submission_service.php` для отправки текстового или голосового ответа в TuneAI;
+- `submission_service.php` для отправки текстового или голосового ответа в TuneAI и polling результата;
+- `gradebook_service.php` для записи проверенного результата в Moodle Gradebook;
+- `/local/tuneai/manage.php` для проверки соединения, чтения manifest и сохранения mapping;
+- scheduled task `local_tuneai\task\sync_submissions` для polling незавершенных submissions;
 - `upload_audio.php`, `templates/recorder.mustache`, `amd/src/recorder.js` для записи голоса через браузер и безопасной отправки через Moodle backend.
 
 ## Связка Moodle и TuneAI
@@ -68,10 +73,9 @@ MOODLE_INTEGRATION_TOKEN=<same-service-token>
 - Moodle group id, если один и тот же вопрос в разных группах должен вести в разные TuneAI тесты;
 - TuneAI `test_id`;
 - TuneAI `question_id`;
-- правила выставления оценки в Gradebook;
 - политика ручной проверки при `teacher_signal`.
 
-Связку лучше хранить в настройках Moodle activity. Преподаватель выбирает опубликованный TuneAI test, затем сопоставляет каждый Moodle question с TuneAI question.
+Связку можно настроить на странице `/local/tuneai/manage.php?courseid=<course-id>`. Преподаватель проверяет соединение с backend, видит опубликованные TuneAI tests из manifest, выбирает question и сохраняет Moodle question id -> TuneAI question id. В таблице виден `answer_mode`: `audio`, `text` или `both`.
 
 Перед настройкой mapping Moodle может запросить TuneAI manifest:
 
@@ -79,7 +83,7 @@ MOODLE_INTEGRATION_TOKEN=<same-service-token>
 GET /integrations/moodle/manifest?methodist_email=methodist@example.edu
 ```
 
-Ответ содержит опубликованные тесты владельца и список вопросов. Это нужно, чтобы Moodle не просил администратора вручную копировать id и не позволял случайно привязать вопрос к чужому тесту.
+Ответ содержит опубликованные тесты владельца и список вопросов. У каждого вопроса есть `answer_mode`: `audio`, `text` или `both`. Moodle UI должен показывать только разрешенный способ ответа.
 
 ## Текстовый ответ
 
@@ -117,7 +121,7 @@ TuneAI создает или переиспользует пользовател
 2. Moodle plugin получает текст из question attempt или assignment submission.
 3. Plugin вызывает `/integrations/moodle/submissions/text`.
 4. Moodle показывает студенту статус обработки.
-5. Plugin опрашивает result endpoint и сохраняет feedback.
+5. Plugin опрашивает result endpoint, сохраняет feedback и при готовности пишет оценку в Gradebook.
 
 ## Голосовой ответ
 
@@ -190,6 +194,10 @@ GET /integrations/moodle/submissions/{external_submission_id}/result
 
 Moodle должен выставлять `grade` или `score/max_score` в Gradebook только при `result_ready=true`. Если `teacher_signal != "none"`, Moodle может сохранить AI-результат, но должен пометить работу для ручной проверки преподавателем.
 
+`local_tuneai` делает это через `submission_service::refresh_submission_result()`. Метод обновляет локальную запись `local_tuneai_submission` и, если включен `gradesync`, вызывает `gradebook_service`.
+
+В production polling выполняет scheduled task `local_tuneai\task\sync_submissions`. Он выбирает pending submissions, повторяет запрос с backoff, сохраняет `last_error` и при готовом результате пишет оценку в Gradebook.
+
 Пример логики:
 
 ```text
@@ -216,17 +224,21 @@ if result_ready=true and teacher_signal!=none:
 
 TuneAI принимает submissions только для опубликованных тестов.
 
-## Что должен делать Moodle plugin
+## Что уже делает Moodle plugin
 
-- Страница настроек activity: загрузить manifest, выбрать TuneAI test и сопоставить вопросы.
-- Mapping repository: учитывать `courseid`, `cmid`, `questionid` и опциональный `groupid`.
-- UI прохождения: показать текстовый ответ или кнопку записи голоса.
-- Backend controller: принять submission от Moodle, вызвать TuneAI service API.
-- Scheduled task: периодически опрашивать result endpoint.
-- Gradebook adapter: выставить оценку, feedback и статус ручной проверки.
+- Хранит mapping по `courseid`, `cmid`, `questionid` и опциональному `groupid`.
+- Берет пользователя из Moodle DB и не просит TuneAI credentials у студента.
+- Показывает страницу mapping и проверку соединения с backend.
+- Отправляет текстовые ответы через service API.
+- Принимает голосовую запись в Moodle и пересылает файл в TuneAI с service token.
+- Сохраняет локальное зеркало submission/result.
+- Забирает готовый result и записывает score/feedback в Moodle Gradebook.
+- Запускает scheduled polling pending submissions.
+
+## Что остается для UI уровня
+
 - Teacher view: показать `teacher_signal`, `review_reason`, confidence и AI feedback.
-
-Заготовка `local_tuneai` уже дает базовые классы для этих действий. UI форм настройки и scheduled task остаются следующим шагом реализации Moodle plugin.
+- Более удобное автоматическое чтение Moodle question id из конкретных activity.
 
 ## E2E-проверка с Moodle в Docker
 
@@ -241,12 +253,15 @@ tests/moodle/run-moodle-e2e.sh
 - поднимает отдельный compose project `tuneai-moodle-e2e`;
 - включает mock AI и Moodle integration token только для этого прогона;
 - ждет готовности backend и Moodle;
+- устанавливает `local_tuneai` через Moodle upgrade;
 - запускает PHP smoke-тест внутри Moodle-контейнера;
 - создает demo exam в TuneAI;
-- отправляет текстовый Moodle submission;
+- создает Moodle course/user и mapping;
+- отправляет текстовый Moodle submission через классы plugin;
 - проверяет idempotency повтора;
-- дожидается результата worker pipeline;
-- валидирует `score`, `max_score`, `grade`, `feedback`, `confidence` и `teacher_signal`.
+- дожидается результата через scheduled task plugin;
+- валидирует `score`, `max_score`, `grade`, `feedback`, `confidence` и `teacher_signal`;
+- проверяет запись оценки в `grade_items` и `grade_grades`.
 
 После успешного или неуспешного прогона runner удаляет контейнеры и volumes. Чтобы оставить окружение для ручной диагностики:
 
@@ -272,4 +287,12 @@ docker compose -p tuneai-moodle-e2e -f docker-compose.yml -f docker-compose.mood
 MOODLE_E2E_SKIP_BUILD=1 tests/moodle/run-moodle-e2e.sh
 ```
 
-Успешный smoke подтверждает, что Moodle-контейнер смог вызвать TuneAI, отправить текстовый ответ, получить idempotent replay и дождаться результата worker pipeline.
+Успешный smoke подтверждает, что Moodle-контейнер установил plugin, передал identity Moodle-пользователя в TuneAI, получил idempotent replay, дождался результата worker pipeline и записал оценку в Moodle Gradebook.
+
+CI также собирает Moodle plugin archive:
+
+```bash
+scripts/package-moodle-plugin.sh
+```
+
+Artifact называется `local_tuneai.zip`.

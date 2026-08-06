@@ -64,6 +64,7 @@ async def process_answer_uploaded(
             question_id=question.id,
             query=f"{question.text}\n{transcript}",
             limit=5,
+            material_policy=str((attempt.test.criteria or {}).get("material_policy") or "test_and_question"),
             ai=ai,
         )
         safety = detect_suspicious_ai_input(

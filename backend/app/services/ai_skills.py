@@ -30,5 +30,31 @@ def load_skill_instructions(db: Session, criteria: dict | None) -> str:
     for skill_id in skill_ids:
         skill = by_id.get(skill_id)
         if skill:
-            blocks.append(f"{skill.name}\n{skill.content}")
+            blocks.append(render_skill_instructions(skill))
     return "\n\n---\n\n".join(blocks)[:MAX_SKILL_INSTRUCTIONS_CHARS]
+
+
+def render_skill_instructions(skill: AISkill) -> str:
+    rubric = ", ".join(
+        f"{item.get('name')}:{item.get('weight')}"
+        for item in (skill.rubric or [])
+        if isinstance(item, dict) and item.get("name")
+    )
+    instructions = "; ".join(str(item).strip() for item in (skill.instructions or []) if str(item).strip())
+    output_flags = ", ".join(
+        key for key, enabled in (skill.output_config or {}).items() if enabled
+    )
+    parts = [
+        f"Evaluator skill: {skill.name}",
+        f"scenario={skill.scenario}; language={skill.language}; strictness={skill.strictness}; "
+        f"score_scale={skill.score_scale}; confidence_threshold={skill.confidence_threshold}; "
+        f"material_policy={skill.material_policy}",
+    ]
+    if rubric:
+        parts.append(f"rubric_weights={rubric}")
+    if instructions:
+        parts.append(f"instructions={instructions}")
+    if output_flags:
+        parts.append(f"required_output={output_flags}")
+    parts.append(f"notes={skill.content}")
+    return "\n".join(parts)

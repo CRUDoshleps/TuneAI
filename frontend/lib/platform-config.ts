@@ -3,6 +3,21 @@ export type PlatformRole = "student" | "examinee" | "candidate" | "methodist" | 
 export type PublicView = "home" | "demo";
 export type PlatformTemplate = "unconfigured" | "official";
 
+export type PlatformTheme = {
+  background?: string;
+  surface?: string;
+  panel?: string;
+  panelSoft?: string;
+  text?: string;
+  muted?: string;
+  line?: string;
+  accent?: string;
+  accentSoft?: string;
+  danger?: string;
+  warning?: string;
+  success?: string;
+};
+
 export type LandingScenarioConfig = {
   id: string;
   label: string;
@@ -41,6 +56,7 @@ export type PlatformConfig = {
   productName: string;
   logoText: string;
   logoUrl?: string;
+  theme?: PlatformTheme;
   repositoryUrl: string;
   docsUrl: string;
   consultationEmail: string;
@@ -75,12 +91,12 @@ const officialConfig: PlatformConfig = {
   docsUrl: "https://github.com/CRUDoshleps/TuneAI#быстрый-запуск",
   consultationEmail: "gsad1030@gmail.com",
   consultationPerson: "Sadovoi Grigorii",
-  headline: "Open-source движок устных тестов и подготовки.",
+  headline: "Устные проверки по материалам курса.",
   subheadline:
-    "Демо показывает действия, которые можно повторить после self-host развертывания: создать тест, настроить RAG, пройти попытку, поменять роли и адаптировать интерфейс.",
+    "Создайте тест, примите голосовой ответ, покажите понятную оценку и оставьте преподавателю контроль над спорными решениями.",
   problemTitle: "Устные ответы сложно проверять одинаково, прозрачно и быстро.",
   problemDescription:
-    "TuneAI помогает собрать тест, принять голосовой ответ, расшифровать речь, сверить ее с материалами курса и показать объяснимую оценку с рекомендациями.",
+    "TuneAI собирает тесты, принимает речь, сверяет ответ с материалами курса и возвращает понятную обратную связь.",
   audienceCards: [
     {
       title: "Учебным командам",
@@ -98,14 +114,14 @@ const officialConfig: PlatformConfig = {
   valueProps: [
     {
       title: "Не просто балл",
-      description: "Ответ сопровождается расшифровкой, объяснением, уверенностью модели и рекомендациями."
+      description: "Ответ сопровождается расшифровкой, объяснением, уверенностью проверки и рекомендациями."
     },
     {
       title: "Опора на материалы",
       description: "RAG связывает проверку с конспектами, регламентами и критериями конкретной организации."
     },
     {
-      title: "Self-host под ваш контур",
+      title: "Развертывание у себя",
       description: "Бренд, роли, UI, AI-профили и демонстрационные сценарии настраиваются через окружение."
     }
   ],
@@ -122,7 +138,7 @@ const officialConfig: PlatformConfig = {
     "Конструктор тестов",
     "Вопросы и рубрики",
     "RAG-материалы",
-    "AI-проверяющие агенты",
+    "Профили AI-проверки",
     "Карта компетенций",
     "Роли и назначения",
     "Админ-панель"
@@ -130,7 +146,7 @@ const officialConfig: PlatformConfig = {
   scenarios: [
     {
       id: "self-host",
-      label: "Self-host",
+      label: "Развертывание",
       eyebrow: "Разверните под себя",
       title: "Склонируйте, забрендируйте и настройте свой контур.",
       description:
@@ -158,11 +174,11 @@ const officialConfig: PlatformConfig = {
     {
       id: "practice",
       label: "Прохождение",
-      eyebrow: "Демо попытки",
+      eyebrow: "Пробные попытки",
       title: "Проверьте полный цикл глазами студента.",
       description:
         "Запустите демо-попытку, запишите устный ответ, получите результат, рекомендации и карту компетенций.",
-      action: "Пройти демо"
+      action: "Пройти пример"
     }
   ],
   demoScenarios: [
@@ -216,15 +232,15 @@ const officialConfig: PlatformConfig = {
     }
   ],
   pipeline: [
-    { step: "01", title: "Clone", description: "Склонировать репозиторий" },
-    { step: "02", title: "Configure", description: "Настроить UI, роли и AI" },
-    { step: "03", title: "Run", description: "Развернуть Docker Compose" },
-    { step: "04", title: "Use", description: "Создавать тесты и RAG" }
+    { step: "01", title: "Код", description: "Склонировать репозиторий" },
+    { step: "02", title: "Настройки", description: "Задать UI, роли и AI" },
+    { step: "03", title: "Запуск", description: "Развернуть Docker Compose" },
+    { step: "04", title: "Работа", description: "Создавать тесты и RAG" }
   ],
   demoActions: [
     { id: "builder", title: "Создать тест", description: "Открыть конструктор с примером", flow: "builder" },
     { id: "materials", title: "Загрузить RAG", description: "Привязать материал к вопросу", flow: "materials" },
-    { id: "take", title: "Пройти демо", description: "Запустить попытку с записью", flow: "take" },
+    { id: "take", title: "Пройти пример", description: "Запустить попытку с записью", flow: "take" },
     { id: "repo", title: "Развернуть у себя", description: "Открыть репозиторий и команды запуска", href: "https://github.com/CRUDoshleps/TuneAI" }
   ],
   roleMatrix: [
@@ -241,19 +257,21 @@ const officialConfig: PlatformConfig = {
   }
 };
 
+export const officialPlatformConfig = officialConfig;
+
 const unconfiguredConfig: PlatformConfig = {
   ...officialConfig,
   template: "unconfigured",
-  productName: "Self-host Test Platform",
-  logoText: "Demo",
+  productName: "Локальная TuneAI",
+  logoText: "TuneAI",
   consultationEmail: "admin@example.com",
-  consultationPerson: "Implementation owner",
-  headline: "Ненастроенный self-host шаблон устных тестов.",
+  consultationPerson: "Администратор инстанса",
+  headline: "Локальная система устных проверок.",
   subheadline:
-    "Это локальная демо-сборка после клонирования. Задайте бренд, почту, роли, сценарии и материалы в `.env`, чтобы превратить шаблон в свою систему.",
+    "Система запущена с базовыми настройками. Задайте название, логотип, почту, роли, сценарии и материалы в `.env`.",
   problemTitle: "Система поднялась локально, но еще не настроена под вашу организацию.",
   problemDescription:
-    "Перед вами нейтральный шаблон TuneAI: он показывает возможности платформы, но не является официальным сайтом проекта и не содержит финального брендинга владельца.",
+    "Это стартовый интерфейс TuneAI для локального запуска. Он показывает рабочие сценарии и помогает быстро настроить свой учебный контур.",
   audienceCards: [
     {
       title: "Настройте аудиторию",
@@ -261,7 +279,7 @@ const unconfiguredConfig: PlatformConfig = {
     },
     {
       title: "Задайте методику",
-      description: "Поменяйте демо-сценарии, вопросы, критерии, компетенции и RAG-материалы под свой процесс."
+      description: "Настройте сценарии, вопросы, критерии, компетенции и RAG-материалы под свой процесс."
     },
     {
       title: "Подключите владельца",
@@ -271,23 +289,23 @@ const unconfiguredConfig: PlatformConfig = {
   valueProps: [
     {
       title: "Шаблон уже работает",
-      description: "Можно пройти демо, создать тест, загрузить материал и проверить полный цикл без внешних сервисов."
+      description: "Можно пройти пробную попытку, создать тест, загрузить материал и проверить полный цикл без внешних сервисов."
     },
     {
       title: "Данные не привязаны к нам",
-      description: "Локальный запуск использует ваши env-настройки, роли и seed-данные в вашей инфраструктуре."
+      description: "Локальный запуск использует ваши `.env` настройки, роли и демо-данные в вашей инфраструктуре."
     },
     {
       title: "Бренд меняется без кода",
       description: "Название, логотип, контакты, сценарии и доступы переопределяются через `.env` или JSON-конфиг."
     }
   ],
-  legalOwner: "Self-host owner",
+  legalOwner: "Владелец развертывания",
   footerLinks: [
     { label: "README", href: officialConfig.docsUrl },
     { label: "GitHub проекта", href: officialConfig.repositoryUrl },
     { label: "Лицензия MIT", href: `${officialConfig.repositoryUrl}/blob/main/LICENSE` },
-    { label: "Настроить контакт", href: "mailto:admin@example.com" }
+    { label: "Связаться с администратором", href: "mailto:admin@example.com" }
   ],
   deploymentCommand: "cp .env.example .env && docker compose up --build -d",
   environmentCommand:
@@ -296,19 +314,19 @@ const unconfiguredConfig: PlatformConfig = {
     {
       id: "setup",
       label: "Настройка",
-      eyebrow: "Self-host шаблон",
-      title: "Вы подняли нейтральную демо-систему.",
+      eyebrow: "Локальное развертывание",
+      title: "Система запущена. Осталось настроить бренд и доступы.",
       description:
-        "Замените placeholder-бренд, консультационную почту, роли, сценарии и тексты в env перед показом пользователям.",
-      action: "Открыть демо"
+        "Замените базовое название, контактную почту, роли, сценарии и тексты в env перед показом пользователям.",
+      action: "Перейти к настройке"
     },
     ...officialConfig.scenarios.slice(1)
   ],
   demoActions: [
-    { id: "builder", title: "Проверить конструктор", description: "Создать временный тест", flow: "builder" },
-    { id: "materials", title: "Проверить RAG", description: "Привязать материал к вопросу", flow: "materials" },
-    { id: "take", title: "Пройти демо", description: "Запустить попытку", flow: "take" },
-    { id: "docs", title: "Настроить шаблон", description: "Открыть README и env-настройки", href: officialConfig.docsUrl }
+    { id: "builder", title: "Открыть конструктор", description: "Создать тест и первый вопрос", flow: "builder" },
+    { id: "materials", title: "Добавить материалы", description: "Привязать RAG к вопросу", flow: "materials" },
+    { id: "take", title: "Пройти пробную попытку", description: "Проверить ответ как пользователь", flow: "take" },
+    { id: "docs", title: "Открыть инструкцию", description: "README и env-настройки", href: officialConfig.docsUrl }
   ]
 };
 
@@ -316,6 +334,7 @@ export function mergePlatformConfig(base: PlatformConfig, overrides: Partial<Pla
   return {
     ...base,
     ...overrides,
+    theme: mergePlatformTheme(base.theme, overrides.theme),
     scenarios: overrides.scenarios?.length ? overrides.scenarios : base.scenarios,
     demoScenarios: overrides.demoScenarios?.length ? overrides.demoScenarios : base.demoScenarios,
     pipeline: overrides.pipeline?.length ? overrides.pipeline : base.pipeline,
@@ -338,6 +357,43 @@ export function mergePlatformConfig(base: PlatformConfig, overrides: Partial<Pla
   };
 }
 
+export function mergePlatformTheme(...themes: Array<PlatformTheme | undefined>): PlatformTheme | undefined {
+  const merged = themes.reduce<PlatformTheme>((acc, theme) => {
+    for (const [key, value] of Object.entries(theme || {}) as Array<[keyof PlatformTheme, string | undefined]>) {
+      if (typeof value === "string" && value.trim()) {
+        acc[key] = value.trim();
+      }
+    }
+    return acc;
+  }, {});
+  return Object.keys(merged).length ? merged : undefined;
+}
+
+export function buildPlatformThemeVars(config: Pick<PlatformConfig, "theme">): Record<string, string> {
+  const theme = config.theme || {};
+  const vars: Array<[keyof PlatformTheme, string]> = [
+    ["background", "--bg"],
+    ["surface", "--surface"],
+    ["panel", "--panel"],
+    ["panelSoft", "--panel-soft"],
+    ["text", "--ink"],
+    ["muted", "--muted"],
+    ["line", "--line"],
+    ["accent", "--yellow"],
+    ["accentSoft", "--yellow-soft"],
+    ["danger", "--red"],
+    ["warning", "--amber"],
+    ["success", "--green"]
+  ];
+  return vars.reduce<Record<string, string>>((acc, [key, variable]) => {
+    const value = theme[key];
+    if (typeof value === "string" && value.trim()) {
+      acc[variable] = value.trim();
+    }
+    return acc;
+  }, {});
+}
+
 function parseJsonConfig(): Partial<PlatformConfig> {
   const raw = process.env.NEXT_PUBLIC_TUNEAI_CONFIG_JSON;
   if (!raw) {
@@ -350,15 +406,34 @@ function parseJsonConfig(): Partial<PlatformConfig> {
   }
 }
 
+function buildThemeFromEnv(): PlatformTheme | undefined {
+  return mergePlatformTheme({
+    background: process.env.NEXT_PUBLIC_TUNEAI_BACKGROUND_COLOR,
+    surface: process.env.NEXT_PUBLIC_TUNEAI_SURFACE_COLOR,
+    panel: process.env.NEXT_PUBLIC_TUNEAI_PANEL_COLOR,
+    panelSoft: process.env.NEXT_PUBLIC_TUNEAI_PANEL_SOFT_COLOR,
+    text: process.env.NEXT_PUBLIC_TUNEAI_TEXT_COLOR,
+    muted: process.env.NEXT_PUBLIC_TUNEAI_MUTED_COLOR,
+    line: process.env.NEXT_PUBLIC_TUNEAI_LINE_COLOR,
+    accent: process.env.NEXT_PUBLIC_TUNEAI_ACCENT_COLOR,
+    accentSoft: process.env.NEXT_PUBLIC_TUNEAI_ACCENT_SOFT_COLOR,
+    danger: process.env.NEXT_PUBLIC_TUNEAI_DANGER_COLOR,
+    warning: process.env.NEXT_PUBLIC_TUNEAI_WARNING_COLOR,
+    success: process.env.NEXT_PUBLIC_TUNEAI_SUCCESS_COLOR
+  });
+}
+
 const jsonConfig = parseJsonConfig();
 const requestedTemplate = process.env.NEXT_PUBLIC_TUNEAI_TEMPLATE || jsonConfig.template;
 const selectedTemplate: PlatformTemplate =
   requestedTemplate === "official" ? "official" : "unconfigured";
 const selectedConfig = selectedTemplate === "official" ? officialConfig : unconfiguredConfig;
+const envTheme = buildThemeFromEnv();
 
 export const platformConfig = mergePlatformConfig(selectedConfig, {
   ...jsonConfig,
   template: selectedTemplate,
+  theme: mergePlatformTheme(jsonConfig.theme, envTheme),
   productName: process.env.NEXT_PUBLIC_TUNEAI_PRODUCT_NAME || jsonConfig.productName || selectedConfig.productName,
   logoText: process.env.NEXT_PUBLIC_TUNEAI_LOGO_TEXT || jsonConfig.logoText || selectedConfig.logoText,
   logoUrl: process.env.NEXT_PUBLIC_TUNEAI_LOGO_URL || jsonConfig.logoUrl,

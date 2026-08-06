@@ -59,6 +59,10 @@ wait_for_healthy backend 240
 wait_for_healthy worker 120
 wait_for_healthy moodle 900
 
+"${COMPOSE[@]}" exec -T moodle sh -lc "find /var/www/html/public/local/tuneai /tuneai-moodle-tests -name '*.php' -print0 | xargs -0 -n1 php -l"
+"${COMPOSE[@]}" exec -T moodle php /var/www/html/admin/cli/purge_caches.php
+"${COMPOSE[@]}" exec -T moodle php /var/www/html/admin/cli/upgrade.php --non-interactive --allow-unstable
+
 "${COMPOSE[@]}" exec -T \
   -e TUNEAI_BASE_URL=http://backend:8000 \
   -e TUNEAI_MOODLE_KEY=tuneai-moodle-e2e-token \

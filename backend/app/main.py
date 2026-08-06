@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api import admin, admin_ai, analytics, attempts, auth, materials, moodle, public, skills, tests, users
+from app.api import admin, admin_ai, analytics, attempts, auth, groups, materials, moodle, public, skills, tests, users
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal, get_db, init_db
@@ -126,6 +126,7 @@ if settings.metrics_enabled:
 app.include_router(auth.router)
 app.include_router(public.router)
 app.include_router(users.router)
+app.include_router(groups.router)
 app.include_router(skills.router)
 app.include_router(tests.router)
 app.include_router(attempts.router)

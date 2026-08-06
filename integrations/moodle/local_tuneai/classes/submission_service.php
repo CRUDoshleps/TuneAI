@@ -7,17 +7,32 @@ class submission_service {
     private client $client;
     private mapping_repository $repository;
     private question_reader $reader;
+    private gradebook_service $gradebook;
 
-    public function __construct(?client $client = null, ?mapping_repository $repository = null, ?question_reader $reader = null) {
+    public function __construct(?client $client = null, ?mapping_repository $repository = null, ?question_reader $reader = null, ?gradebook_service $gradebook = null) {
         $this->client = $client ?? new client();
         $this->repository = $repository ?? new mapping_repository();
         $this->reader = $reader ?? new question_reader();
+        $this->gradebook = $gradebook ?? new gradebook_service();
     }
 
     public function submit_question_attempt(int $courseid, int $cmid, int $questionattemptid, int $userid, ?int $groupid = null): array {
-        global $DB;
         $qa = $this->reader->read_question_attempt($questionattemptid);
-        $mapping = $this->repository->find_mapping($courseid, $cmid, $qa['questionid'], $groupid);
+        return $this->submit_text_answer($courseid, $cmid, $qa['questionid'], $userid, $qa['answertext'], $groupid, $this->external_submission_id($courseid, $cmid, $questionattemptid, $userid, $groupid), $questionattemptid);
+    }
+
+    public function submit_text_answer(
+        int $courseid,
+        int $cmid,
+        int $questionid,
+        int $userid,
+        string $answertext,
+        ?int $groupid = null,
+        ?string $externalsubmissionid = null,
+        ?int $questionattemptid = null
+    ): array {
+        global $DB;
+        $mapping = $this->repository->find_mapping($courseid, $cmid, $questionid, $groupid);
         if (!$mapping) {
             throw new \moodle_exception('TuneAI mapping was not found for this Moodle question');
         }
@@ -28,7 +43,7 @@ class submission_service {
             $groupname = $group ? $group->name : null;
         }
         $payload = [
-            'external_submission_id' => $this->external_submission_id($courseid, $cmid, $questionattemptid, $userid, $groupid),
+            'external_submission_id' => $externalsubmissionid ?: $this->external_text_submission_id($courseid, $cmid, $questionid, $userid, $groupid),
             'external_attempt_id' => 'moodle-cm-' . $cmid . '-user-' . $userid,
             'moodle_user_id' => (string) $userid,
             'moodle_course_id' => (string) $courseid,
@@ -40,7 +55,7 @@ class submission_service {
             'user_full_name' => fullname($user),
             'test_id' => $mapping->tuneai_test_id,
             'question_id' => $mapping->tuneai_question_id,
-            'text' => $qa['answertext'],
+            'text' => $answertext,
         ];
         if (trim($payload['text']) === '') {
             throw new \moodle_exception('Moodle answer text is empty');
@@ -108,6 +123,28 @@ class submission_service {
         return $result;
     }
 
+    public function refresh_submission_result(string $externalsubmissionid): array {
+        $submission = $this->repository->find_submission($externalsubmissionid);
+        if (!$submission) {
+            throw new \moodle_exception('TuneAI submission was not found in Moodle');
+        }
+        $result = $this->client->result($externalsubmissionid);
+        $updated = $this->repository->save_submission($result, [
+            'courseid' => (int) $submission->courseid,
+            'cmid' => (int) $submission->cmid,
+            'questionattemptid' => $submission->questionattemptid !== null ? (int) $submission->questionattemptid : null,
+            'userid' => (int) $submission->userid,
+            'groupid' => $submission->groupid !== null ? (int) $submission->groupid : null,
+            'tuneai_test_id' => $submission->tuneai_test_id,
+            'tuneai_question_id' => $submission->tuneai_question_id,
+        ]);
+        $gradesync = $this->gradebook->sync_result($result, $updated);
+        if ($gradesync !== null) {
+            $result['moodle_grade_sync'] = $gradesync;
+        }
+        return $result;
+    }
+
     private function external_submission_id(int $courseid, int $cmid, int $questionattemptid, int $userid, ?int $groupid): string {
         $parts = ['course', $courseid, 'cm', $cmid, 'qa', $questionattemptid, 'user', $userid];
         if ($groupid !== null) {
@@ -119,6 +156,15 @@ class submission_service {
 
     private function external_audio_submission_id(int $courseid, int $cmid, int $questionid, int $userid, ?int $groupid): string {
         $parts = ['course', $courseid, 'cm', $cmid, 'question', $questionid, 'user', $userid, 'audio'];
+        if ($groupid !== null) {
+            $parts[] = 'group';
+            $parts[] = $groupid;
+        }
+        return implode('-', array_map('strval', $parts));
+    }
+
+    private function external_text_submission_id(int $courseid, int $cmid, int $questionid, int $userid, ?int $groupid): string {
+        $parts = ['course', $courseid, 'cm', $cmid, 'question', $questionid, 'user', $userid, 'text'];
         if ($groupid !== null) {
             $parts[] = 'group';
             $parts[] = $groupid;

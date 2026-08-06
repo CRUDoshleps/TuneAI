@@ -71,6 +71,18 @@ class Settings(BaseSettings):
         default="Implementation owner",
         validation_alias=AliasChoices("TUNEAI_CONSULTATION_PERSON", "NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON"),
     )
+    tuneai_background_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_BACKGROUND_COLOR", "NEXT_PUBLIC_TUNEAI_BACKGROUND_COLOR"))
+    tuneai_surface_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_SURFACE_COLOR", "NEXT_PUBLIC_TUNEAI_SURFACE_COLOR"))
+    tuneai_panel_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_PANEL_COLOR", "NEXT_PUBLIC_TUNEAI_PANEL_COLOR"))
+    tuneai_panel_soft_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_PANEL_SOFT_COLOR", "NEXT_PUBLIC_TUNEAI_PANEL_SOFT_COLOR"))
+    tuneai_text_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_TEXT_COLOR", "NEXT_PUBLIC_TUNEAI_TEXT_COLOR"))
+    tuneai_muted_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_MUTED_COLOR", "NEXT_PUBLIC_TUNEAI_MUTED_COLOR"))
+    tuneai_line_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_LINE_COLOR", "NEXT_PUBLIC_TUNEAI_LINE_COLOR"))
+    tuneai_accent_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_ACCENT_COLOR", "NEXT_PUBLIC_TUNEAI_ACCENT_COLOR"))
+    tuneai_accent_soft_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_ACCENT_SOFT_COLOR", "NEXT_PUBLIC_TUNEAI_ACCENT_SOFT_COLOR"))
+    tuneai_danger_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_DANGER_COLOR", "NEXT_PUBLIC_TUNEAI_DANGER_COLOR"))
+    tuneai_warning_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_WARNING_COLOR", "NEXT_PUBLIC_TUNEAI_WARNING_COLOR"))
+    tuneai_success_color: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_SUCCESS_COLOR", "NEXT_PUBLIC_TUNEAI_SUCCESS_COLOR"))
     tuneai_config_json: str | None = Field(default=None, validation_alias=AliasChoices("TUNEAI_CONFIG_JSON", "NEXT_PUBLIC_TUNEAI_CONFIG_JSON"))
 
     storage_backend: Literal["local", "s3"] = "local"

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -11,8 +11,10 @@ import {
   ClipboardList,
   Database,
   FileText,
+  HeartPulse,
   KeyRound,
   LogOut,
+  Mail,
   Mic,
   Play,
   Plus,
@@ -26,6 +28,7 @@ import {
   Users
 } from "lucide-react";
 import {
+  buildPlatformThemeVars,
   mergePlatformConfig,
   platformConfig as defaultPlatformConfig,
   type DemoActionConfig,
@@ -44,13 +47,22 @@ import {
   Answer,
   apiFetch,
   Attempt,
+  CalibrationPreviewResult,
   CompetencyMetric,
   DemoBootstrapResponse,
+  GeneratedQuestionCandidate,
+  Group,
   getUserErrorMessage,
   Material,
+  MaterialPolicy,
   PublicConfigResponse,
+  QuestionAnswerMode,
+  QuestionGenerationResult,
+  PasswordReset,
   ReviewQueueItem,
+  SystemHealth,
   Test,
+  UserInvite,
   User
 } from "../lib/api";
 
@@ -80,9 +92,20 @@ const TEST_STATUS_LABELS: Record<Test["status"], string> = {
 };
 
 const MATERIAL_INDEX_LABELS: Record<Material["index_status"], string> = {
+  uploaded: "Загружен",
+  parsing: "Разбираем файл",
+  chunking: "Делим на фрагменты",
+  embedding: "Строим embeddings",
   pending: "RAG индексируется",
   indexed: "RAG готов",
   failed: "Ошибка RAG"
+};
+
+const MATERIAL_SCOPE_LABELS: Record<Material["scope"], string> = {
+  organization: "Библиотека организации",
+  course: "Библиотека курса",
+  test: "Весь тест",
+  question: "Вопрос"
 };
 
 const AI_PROVIDER_LABELS: Record<AIProviderConfig["provider"], string> = {
@@ -110,6 +133,12 @@ const ANSWER_STATUS_LABELS: Record<Answer["status"], string> = {
   failed: "Не удалось обработать"
 };
 
+const QUESTION_ANSWER_MODE_LABELS: Record<QuestionAnswerMode, string> = {
+  audio: "Голос",
+  text: "Текст",
+  both: "Голос или текст"
+};
+
 const DEFAULT_RUBRIC = "Оценить корректность, полноту, аргументацию и опору на материалы.";
 const DEFAULT_AGENT = "rubric-rag-reviewer";
 
@@ -128,9 +157,16 @@ function getCriteriaNumber(test: Test | null, key: string, fallback: number) {
   return typeof value === "number" ? value : fallback;
 }
 
+function questionAnswerModeFromForm(form: FormData): QuestionAnswerMode {
+  const value = String(form.get("answer_mode") || "both");
+  return value === "audio" || value === "text" || value === "both" ? value : "both";
+}
+
 function buildCriteriaFromForm(form: FormData) {
   const competencies = parseCompetencies(String(form.get("competencies") || ""));
   const skillIds = form.getAll("skill_ids").map((item) => String(item)).filter(Boolean);
+  const organizationId = String(form.get("organization_id") || "").trim();
+  const courseId = String(form.get("course_id") || "").trim();
   return {
     rubric: String(form.get("rubric") || DEFAULT_RUBRIC),
     competencies: competencies.map((item) => item.name),
@@ -139,7 +175,31 @@ function buildCriteriaFromForm(form: FormData) {
     agent_profile: String(form.get("agent_profile") || DEFAULT_AGENT),
     review_confidence_threshold: Number(form.get("review_confidence_threshold") || 0.78),
     strictness: String(form.get("strictness") || "balanced"),
-    material_policy: String(form.get("material_policy") || "test_and_question")
+    material_policy: String(form.get("material_policy") || "test_and_question"),
+    ...(organizationId ? { organization_id: organizationId } : {}),
+    ...(courseId ? { course_id: courseId } : {})
+  };
+}
+
+function buildSkillPayloadFromForm(form: FormData) {
+  return {
+    name: String(form.get("name")),
+    description: String(form.get("description") || ""),
+    content: String(form.get("content")),
+    scenario: String(form.get("scenario") || "exam"),
+    language: String(form.get("language") || "ru"),
+    strictness: String(form.get("strictness") || "balanced"),
+    score_scale: Number(form.get("score_scale") || 10),
+    confidence_threshold: Number(form.get("confidence_threshold") || 0.78),
+    material_policy: String(form.get("material_policy") || "test_and_question"),
+    rubric: parseRubric(String(form.get("rubric_items") || "")),
+    instructions: parseLines(String(form.get("instructions") || "")),
+    output: {
+      require_sources: form.get("require_sources") === "on",
+      require_recommendations: form.get("require_recommendations") === "on",
+      require_manual_review_reason: form.get("require_manual_review_reason") === "on"
+    },
+    is_active: form.get("is_active") !== "off"
   };
 }
 
@@ -193,6 +253,27 @@ function parseCompetencies(value: string) {
     .map((item) => item.trim())
     .filter(Boolean)
     .map((name) => ({ name, weight: 1 }));
+}
+
+function parseLines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseRubric(value: string) {
+  return parseLines(value).map((line) => {
+    const [name, rawWeight] = line.split(":");
+    return {
+      name: (name || line).trim(),
+      weight: Number(rawWeight || 1) || 1
+    };
+  });
+}
+
+function formatRubricItems(skill: AISkill) {
+  return (skill.rubric || []).map((item) => `${item.name}: ${item.weight}`).join("\n");
 }
 
 function buildCompetencyMap(attempts: Attempt[], tests: Test[]) {
@@ -260,11 +341,11 @@ function formatJobStatus(status: string) {
   return "В обработке";
 }
 
-export default function TuneAIApp() {
+export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | "widget" }) {
   const [activePlatformConfig, setActivePlatformConfig] = useState<PlatformConfig>(defaultPlatformConfig);
   const [token, setToken] = useState<string>("");
   const [user, setUser] = useState<User | null>(null);
-  const [mode, setMode] = useState<"login" | "register">("register");
+  const [mode, setMode] = useState<"login" | "register">(appMode === "widget" ? "login" : "register");
   const [authSpace, setAuthSpace] = useState<"public" | "admin">("public");
   const [tests, setTests] = useState<Test[]>([]);
   const [selectedTest, setSelectedTest] = useState<Test | null>(null);
@@ -274,18 +355,31 @@ export default function TuneAIApp() {
   const [adminUsers, setAdminUsers] = useState<User[]>([]);
   const [adminAttempts, setAdminAttempts] = useState<AdminAttempt[]>([]);
   const [failedJobs, setFailedJobs] = useState<AdminFailedJob[]>([]);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [aiProviders, setAiProviders] = useState<AIProviderConfig[]>([]);
+  const [lastInvite, setLastInvite] = useState<UserInvite | null>(null);
+  const [lastPasswordReset, setLastPasswordReset] = useState<PasswordReset | null>(null);
+  const [adminGroups, setAdminGroups] = useState<Group[]>([]);
   const [aiSkills, setAiSkills] = useState<AISkill[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [adminMaterials, setAdminMaterials] = useState<Material[]>([]);
   const [adminMaterialTestId, setAdminMaterialTestId] = useState<string>("");
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
   const [competencyMetrics, setCompetencyMetrics] = useState<CompetencyMetric[]>([]);
+  const [generatedQuestions, setGeneratedQuestions] = useState<GeneratedQuestionCandidate[]>([]);
+  const [questionGenerationMeta, setQuestionGenerationMeta] = useState<QuestionGenerationResult | null>(null);
+  const [calibrationPreview, setCalibrationPreview] = useState<CalibrationPreviewResult | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [status, setStatus] = useState<string>("Готово к работе");
   const [error, setError] = useState<string>("");
   const [publicView, setPublicView] = useState<PublicView>("home");
   const [demoScenarioId, setDemoScenarioId] = useState<string>(defaultPlatformConfig.demoScenarios[0]?.id || "self-training");
+  const [widgetTestId] = useState<string>(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    return new URLSearchParams(window.location.search).get("test_id") || "";
+  });
   const loadMeRef = useRef<(activeToken?: string) => Promise<void>>(async () => undefined);
   const clearAuthRef = useRef<() => void>(() => undefined);
   const loadAttemptHistoryRef = useRef<(activeToken?: string, availableTests?: Test[]) => Promise<void>>(async () => undefined);
@@ -339,6 +433,8 @@ export default function TuneAIApp() {
   const selectedTestId = selectedTest?.id;
   const manageableTests = user ? tests.filter((test) => canManageTest(test)) : [];
   const takableTests = tests.filter((test) => test.status === "published");
+  const isWidget = appMode === "widget";
+  const widgetTests = widgetTestId ? takableTests.filter((test) => test.id === widgetTestId) : takableTests;
   const activeTitle = {
     overview: "Рабочий стол",
     take: "Прохождение",
@@ -369,6 +465,9 @@ export default function TuneAIApp() {
   async function loadMe(activeToken = token) {
     const me = await apiFetch<User>("/auth/me", {}, activeToken);
     setUser(me);
+    if (me.must_change_password) {
+      return;
+    }
     const availableTests = await loadTests(activeToken);
     await loadAttemptHistory(activeToken, availableTests);
     await loadCompetencies(activeToken);
@@ -381,6 +480,7 @@ export default function TuneAIApp() {
     if (["teacher", "methodist", "interviewer"].includes(me.role)) {
       const users = await apiFetch<User[]>("/users", {}, activeToken);
       setAdminUsers(users);
+      await loadGroups(activeToken);
     }
     if (me.role === "admin") {
       await loadAdmin(activeToken);
@@ -413,12 +513,22 @@ export default function TuneAIApp() {
     const users = await apiFetch<User[]>("/users", {}, activeToken);
     const attempts = await apiFetch<AdminAttempt[]>("/admin/attempts", {}, activeToken);
     const failed = await apiFetch<AdminFailedJob[]>("/admin/failed-jobs", {}, activeToken);
+    const health = await apiFetch<SystemHealth>("/admin/system", {}, activeToken);
     const providers = await apiFetch<AIProviderConfig[]>("/admin/ai-providers", {}, activeToken);
+    const groups = await apiFetch<Group[]>("/groups", {}, activeToken);
     setAdminDashboard(dashboard);
     setAdminUsers(users);
     setAdminAttempts(attempts);
     setFailedJobs(failed);
+    setSystemHealth(health);
     setAiProviders(providers);
+    setAdminGroups(groups);
+  }
+
+  async function loadGroups(activeToken = token) {
+    const groups = await apiFetch<Group[]>("/groups", {}, activeToken);
+    setAdminGroups(groups);
+    return groups;
   }
 
   async function loadReviewQueue(activeToken = token) {
@@ -476,13 +586,19 @@ export default function TuneAIApp() {
     setAdminUsers([]);
     setAdminAttempts([]);
     setFailedJobs([]);
+    setSystemHealth(null);
     setAiProviders([]);
     setAiSkills([]);
+    setLastInvite(null);
+    setLastPasswordReset(null);
     setMaterials([]);
     setAdminMaterials([]);
     setAdminMaterialTestId("");
     setReviewQueue([]);
     setCompetencyMetrics([]);
+    setGeneratedQuestions([]);
+    setQuestionGenerationMeta(null);
+    setCalibrationPreview(null);
     setActiveSection("overview");
   }
 
@@ -544,7 +660,7 @@ export default function TuneAIApp() {
           setActiveSection("take");
         }
       }
-      setStatus(`Открыт демо-сценарий: ${scenario.label}`);
+      setStatus(`Открыт пробный сценарий: ${scenario.label}`);
     } catch {
       await startDemoFlow(scenario.flow, scenario.id);
     }
@@ -591,9 +707,9 @@ export default function TuneAIApp() {
       } else {
         setActiveSection("builder");
       }
-      setStatus("Демо готово к работе");
+      setStatus("Пробный сценарий готов к работе");
     } catch (err) {
-      setError(getUserErrorMessage(err, "Не удалось запустить демо."));
+      setError(getUserErrorMessage(err, "Не удалось открыть пробный сценарий."));
     }
   }
 
@@ -618,6 +734,7 @@ export default function TuneAIApp() {
                 text: question,
                 expected_answer: String(form.get("expected_answer")),
                 competencies: parseCompetencies(String(form.get("competencies") || "")),
+                answer_mode: questionAnswerModeFromForm(form),
                 order_index: 0,
                 max_score: 10
               }
@@ -691,6 +808,7 @@ export default function TuneAIApp() {
             text: String(form.get("text")),
             expected_answer: String(form.get("expected_answer") || ""),
             competencies: parseCompetencies(String(form.get("competencies") || "")),
+            answer_mode: questionAnswerModeFromForm(form),
             order_index: selectedTest.question_count,
             max_score: Number(form.get("max_score") || 10)
           })
@@ -717,12 +835,7 @@ export default function TuneAIApp() {
         "/skills",
         {
           method: "POST",
-          body: JSON.stringify({
-            name: String(form.get("name")),
-            description: String(form.get("description") || ""),
-            content: String(form.get("content")),
-            is_active: true
-          })
+          body: JSON.stringify(buildSkillPayloadFromForm(form))
         },
         token
       );
@@ -775,9 +888,7 @@ export default function TuneAIApp() {
         {
           method: "PATCH",
           body: JSON.stringify({
-            name: String(form.get("name")),
-            description: String(form.get("description") || ""),
-            content: String(form.get("content")),
+            ...buildSkillPayloadFromForm(form),
             is_active: form.get("is_active") === "on"
           })
         },
@@ -802,7 +913,7 @@ export default function TuneAIApp() {
     }
   }
 
-  async function assignTest(event: FormEvent<HTMLFormElement>) {
+  async function generateQuestionsFromRag(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedTest || !canManageSelectedTest) {
       return;
@@ -810,17 +921,192 @@ export default function TuneAIApp() {
     setError("");
     const form = new FormData(event.currentTarget);
     try {
+      const result = await apiFetch<QuestionGenerationResult>(
+        `/tests/${selectedTest.id}/generate-questions`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            count: Number(form.get("count") || 5),
+            material_policy: String(form.get("material_policy") || "test_and_question") as MaterialPolicy,
+            reuse_existing: form.get("reuse_existing") === "on",
+            max_context_chunks: Number(form.get("max_context_chunks") || 10),
+            max_tokens_budget: Number(form.get("max_tokens_budget") || 1400)
+          })
+        },
+        token
+      );
+      setGeneratedQuestions(result.questions);
+      setQuestionGenerationMeta(result);
+      setStatus(`RAG предложил ${result.questions.length} вопросов, chunks: ${result.source_chunk_count}, бюджет: ${result.token_budget_estimate} ток.`);
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось сгенерировать вопросы из RAG."));
+    }
+  }
+
+  async function addGeneratedQuestion(candidate: GeneratedQuestionCandidate) {
+    if (!selectedTest || !canManageSelectedTest) {
+      return;
+    }
+    setError("");
+    try {
       await apiFetch(
-        `/tests/${selectedTest.id}/assign`,
+        `/tests/${selectedTest.id}/questions`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            text: candidate.text,
+            expected_answer: candidate.expected_answer,
+            competencies: candidate.competencies,
+            answer_mode: candidate.answer_mode,
+            order_index: selectedTest.question_count,
+            max_score: candidate.max_score
+          })
+        },
+        token
+      );
+      const updated = await apiFetch<Test>(`/tests/${selectedTest.id}`, {}, token);
+      await loadTests();
+      setSelectedTest(updated);
+      setGeneratedQuestions((items) => items.filter((item) => item.text !== candidate.text));
+      setStatus("Сгенерированный вопрос добавлен");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось добавить сгенерированный вопрос."));
+    }
+  }
+
+  async function previewCalibration(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTest || !canManageSelectedTest) {
+      return;
+    }
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const examples = [
+      { label: "Сильный ответ", answer: String(form.get("good_answer") || "").trim() },
+      { label: "Средний ответ", answer: String(form.get("medium_answer") || "").trim() },
+      { label: "Слабый ответ", answer: String(form.get("weak_answer") || "").trim() }
+    ].filter((item) => item.answer);
+    try {
+      const result = await apiFetch<CalibrationPreviewResult>(
+        `/tests/${selectedTest.id}/calibration-preview`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            skill_id: String(form.get("skill_id") || "") || null,
+            question_id: String(form.get("question_id") || "") || null,
+            examples
+          })
+        },
+        token
+      );
+      setCalibrationPreview(result);
+      setStatus(`Calibration готов: ${result.items.length} примеров, бюджет: ${result.token_budget_estimate} ток.`);
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось выполнить calibration preview."));
+    }
+  }
+
+  async function assignTest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTest || !canManageSelectedTest) {
+      return;
+    }
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const userId = String(form.get("user_id") || "");
+    const groupId = String(form.get("group_id") || "");
+    try {
+      if (groupId) {
+        const result = await apiFetch<{ assigned_count: number; skipped_count: number }>(
+          `/tests/${selectedTest.id}/assign-group`,
+          {
+            method: "POST",
+            body: JSON.stringify({ group_id: groupId })
+          },
+          token
+        );
+        setStatus(`Группа назначена: ${result.assigned_count} новых, ${result.skipped_count} уже были назначены`);
+      } else {
+        await apiFetch(
+          `/tests/${selectedTest.id}/assign`,
+          {
+            method: "POST",
+            body: JSON.stringify({ user_id: userId })
+          },
+          token
+        );
+        setStatus("Пользователь назначен на тест");
+      }
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось назначить доступ к тесту."));
+    }
+  }
+
+  async function handleWidgetLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const pair = await apiFetch<TokenPair>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: String(form.get("email")),
+          password: String(form.get("password"))
+        })
+      });
+      saveAuth(pair);
+      await loadMe(pair.access_token);
+      setStatus("Вход выполнен");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось войти в виджет."));
+    }
+  }
+
+  async function createGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user || !["admin", "teacher", "methodist", "interviewer"].includes(user.role)) {
+      return;
+    }
+    setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try {
+      await apiFetch<Group>(
+        "/groups",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: String(form.get("name")),
+            description: String(form.get("description") || "")
+          })
+        },
+        token
+      );
+      await loadGroups();
+      setStatus("Группа создана");
+      formElement.reset();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось создать группу."));
+    }
+  }
+
+  async function addGroupMember(group: Group, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiFetch<Group>(
+        `/groups/${group.id}/members`,
         {
           method: "POST",
           body: JSON.stringify({ user_id: String(form.get("user_id")) })
         },
         token
       );
-      setStatus("Пользователь назначен на тест");
+      await loadGroups();
+      setStatus("Участник добавлен в группу");
     } catch (err) {
-      setError(getUserErrorMessage(err, "Не удалось назначить пользователя."));
+      setError(getUserErrorMessage(err, "Не удалось добавить участника в группу."));
     }
   }
 
@@ -851,6 +1137,91 @@ export default function TuneAIApp() {
       formElement.reset();
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось создать пользователя."));
+    }
+  }
+
+  async function createInvite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try {
+      const invite = await apiFetch<UserInvite>(
+        "/users/invites",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: String(form.get("email")),
+            full_name: String(form.get("full_name")),
+            role: String(form.get("role")),
+            expires_in_days: Number(form.get("expires_in_days") || 7)
+          })
+        },
+        token
+      );
+      setLastInvite(invite);
+      setStatus("Приглашение создано");
+      formElement.reset();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось создать приглашение."));
+    }
+  }
+
+  async function importUsersCsv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const file = form.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      setError("Выберите CSV файл с колонками email, full_name, role, password.");
+      return;
+    }
+    const payload = new FormData();
+    payload.append("file", file);
+    try {
+      const created = await apiFetch<Array<{ user: User; password: string }>>("/users/batch/csv", { method: "POST", body: payload }, token);
+      await loadAdmin();
+      setStatus(`Импортировано пользователей: ${created.length}`);
+      formElement.reset();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось импортировать CSV."));
+    }
+  }
+
+  async function resetAdminPassword(targetUser: User) {
+    setError("");
+    try {
+      const reset = await apiFetch<PasswordReset>(`/users/${targetUser.id}/reset-password`, { method: "POST" }, token);
+      setLastPasswordReset(reset);
+      await loadAdmin();
+      setStatus("Временный пароль создан");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось сбросить пароль."));
+    }
+  }
+
+  async function changeTemporaryPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const updated = await apiFetch<User>(
+        "/auth/change-password",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            current_password: String(form.get("current_password")),
+            new_password: String(form.get("new_password"))
+          })
+        },
+        token
+      );
+      setUser(updated);
+      await loadMe();
+      setStatus("Пароль изменен");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось сменить пароль."));
     }
   }
 
@@ -1024,13 +1395,28 @@ export default function TuneAIApp() {
     const form = new FormData(formElement);
     const file = form.get("file");
     const questionId = String(form.get("question_id") || "");
+    const materialScope = String(form.get("scope") || (questionId ? "question" : "test"));
+    const organizationId = String(form.get("organization_id") || "").trim();
+    const courseId = String(form.get("course_id") || "").trim();
     try {
       if (file instanceof File && file.size > 0) {
         const payload = new FormData();
         payload.append("file", file);
-        const scope = questionId ? `&question_id=${encodeURIComponent(questionId)}` : "";
+        const query = new URLSearchParams({
+          test_id: selectedTest.id,
+          scope: materialScope
+        });
+        if (questionId) {
+          query.set("question_id", questionId);
+        }
+        if (organizationId) {
+          query.set("organization_id", organizationId);
+        }
+        if (courseId) {
+          query.set("course_id", courseId);
+        }
         await apiFetch<Material>(
-          `/materials/upload?test_id=${selectedTest.id}${scope}`,
+          `/materials/upload?${query}`,
           { method: "POST", body: payload },
           token
         );
@@ -1042,8 +1428,12 @@ export default function TuneAIApp() {
             body: JSON.stringify({
               test_id: selectedTest.id,
               question_id: questionId || null,
+              scope: materialScope,
+              organization_id: organizationId || null,
+              course_id: courseId || null,
               title: String(form.get("title") || "Учебный материал"),
-              content: String(form.get("content"))
+              content: String(form.get("content")),
+              content_type: "text/plain"
             })
           },
           token
@@ -1166,10 +1556,91 @@ export default function TuneAIApp() {
   const activeDemoScenario =
     activePlatformConfig.demoScenarios.find((scenario) => scenario.id === demoScenarioId) || activePlatformConfig.demoScenarios[0];
   const consultationHref = `mailto:${activePlatformConfig.consultationEmail}?subject=${encodeURIComponent(`Консультация по внедрению ${activePlatformConfig.productName}`)}`;
+  const themeVars = buildPlatformThemeVars(activePlatformConfig) as CSSProperties;
+
+  if (isWidget) {
+    if (!user) {
+      return (
+        <main className="widget-shell" style={themeVars}>
+          <section className="widget-card widget-login" aria-label={`${activePlatformConfig.productName} widget login`}>
+            <div className="widget-brand">
+              {activePlatformConfig.logoUrl && (
+                <span className="logo-image" style={{ backgroundImage: `url(${activePlatformConfig.logoUrl})` }} aria-hidden="true" />
+              )}
+              <strong>{activePlatformConfig.logoText}</strong>
+            </div>
+            <div>
+              <h1>Войдите, чтобы пройти назначенный тест.</h1>
+              <p>Используйте логин и пароль, которые выдал преподаватель, интервьюер или администратор.</p>
+            </div>
+            <form onSubmit={handleWidgetLogin} className="stack">
+              <input name="email" type="email" placeholder="Email" required />
+              <input name="password" type="password" placeholder="Пароль" required minLength={1} />
+              <button className="primary" type="submit"><UserRound size={18} /> Войти</button>
+            </form>
+            {error && <p className="error">{error}</p>}
+          </section>
+        </main>
+      );
+    }
+
+    const visibleWidgetTest = selectedTest && widgetTests.some((test) => test.id === selectedTest.id) ? selectedTest : widgetTests[0] || null;
+
+    return (
+      <main className="widget-shell" style={themeVars}>
+        <section className="widget-card widget-runner" aria-label={`${activePlatformConfig.productName} встроенная проверка`}>
+          <header className="widget-header">
+            <div className="widget-brand">
+              {activePlatformConfig.logoUrl && (
+                <span className="logo-image" style={{ backgroundImage: `url(${activePlatformConfig.logoUrl})` }} aria-hidden="true" />
+              )}
+              <strong>{activePlatformConfig.logoText}</strong>
+            </div>
+            <div>
+              <span>{user.full_name}</span>
+              <button className="ghost" onClick={clearAuth}><LogOut size={16} /> Выйти</button>
+            </div>
+          </header>
+          {error && <div className="banner error">{error}</div>}
+          <section className="widget-layout">
+            <TestPicker
+              title={widgetTestId ? "Назначенный тест" : "Назначенные тесты"}
+              tests={widgetTests}
+              selectedTest={visibleWidgetTest}
+              emptyText={widgetTestId ? "Этот тест не назначен вашему аккаунту." : "Пока нет назначенных тестов."}
+              onSelect={(test) => {
+                setSelectedTest(test);
+                const latestForTest = attemptHistory.find((item) => item.test_id === test.id);
+                setAttempt(latestForTest || null);
+              }}
+            />
+            <section className="widget-main">
+              {visibleWidgetTest ? (
+                <TestRunner
+                  test={visibleWidgetTest}
+                  attempt={attempt?.test_id === visibleWidgetTest.id ? attempt : null}
+                  answers={attempt?.test_id === visibleWidgetTest.id ? attempt.answers : []}
+                  onStart={() => startAttempt(visibleWidgetTest)}
+                  onUpload={uploadRecording}
+                  onTextSubmit={uploadTextAnswer}
+                  onError={setError}
+                />
+              ) : (
+                <EmptyState
+                  title="Нет доступа к тесту"
+                  text="Проверьте логин или обратитесь к тому, кто выдал учетные данные."
+                />
+              )}
+            </section>
+          </section>
+        </section>
+      </main>
+    );
+  }
 
   if (!user) {
     return (
-      <main className="shell auth-shell">
+      <main className="shell auth-shell" style={themeVars}>
         <section className="landing-card">
           <header className="landing-nav">
             <div className="logo-word">
@@ -1194,14 +1665,16 @@ export default function TuneAIApp() {
                 </button>
               ))}
             </nav>
-            <a className="nav-pill" href={consultationHref}>Консультация</a>
+            <a className="nav-pill" href={consultationHref}>
+              {activePlatformConfig.template === "official" ? "Консультация" : "Контакт"}
+            </a>
           </header>
 
           {publicView === "home" ? (
             <section className="public-home">
               <section className="landing-hero home-hero">
                 <div className="hero-copy">
-                  <div className="eyebrow">Open-source платформа устных проверок</div>
+                  <div className="eyebrow">Платформа устных проверок</div>
                   <h1>{activePlatformConfig.headline}</h1>
                   <p>{activePlatformConfig.problemDescription}</p>
                   <div className="hero-actions">
@@ -1225,7 +1698,7 @@ export default function TuneAIApp() {
                   </div>
                   <div className="preview-feedback">
                     <strong>Обратная связь</strong>
-                    <p>Ответ точный, но не хватает примера retry и идемпотентности.</p>
+                    <p>Ответ точный, но не хватает примера повторной обработки и идемпотентности.</p>
                   </div>
                 </section>
               </section>
@@ -1261,9 +1734,9 @@ export default function TuneAIApp() {
             <section className="demo-page">
               <div className="demo-heading">
                 <div>
-                  <div className="eyebrow">Полноценная демо-версия</div>
+                  <div className="eyebrow">Пробный сценарий</div>
                   <h1>Выберите сценарий и посмотрите платформу изнутри.</h1>
-                  <p>Демо-регистрация создаст временный контур, а тестовый аккаунт откроет подготовленные seed-данные.</p>
+                  <p>Пробная регистрация создаст временного пользователя, тест и материалы для выбранного сценария.</p>
                 </div>
                 <a className="secondary" href={activePlatformConfig.docsUrl} target="_blank" rel="noreferrer">Документация</a>
               </div>
@@ -1297,7 +1770,7 @@ export default function TuneAIApp() {
                   </div>
                   <div className="hero-actions left">
                     <button className="primary" onClick={() => startDemoFlow(activeDemoScenario.flow, activeDemoScenario.id)}>
-                      Демо-регистрация
+                      Создать пробный контур
                     </button>
                     <button className="secondary" onClick={() => loginDemoAccount(activeDemoScenario)}>
                       Войти под тестовым аккаунтом
@@ -1359,7 +1832,7 @@ export default function TuneAIApp() {
 
           <section className="consultation-panel" aria-label="Заявка на консультацию">
             <div>
-              <strong>Нужна консультация по внедрению?</strong>
+              <strong>{activePlatformConfig.template === "official" ? "Нужна консультация по внедрению?" : "Нужна помощь с настройкой?"}</strong>
               <p>Если есть сложности, вопросы или пожелания по развертыванию, напишите на почту. Ответственный: {activePlatformConfig.consultationPerson}.</p>
             </div>
             <a className="primary" href={consultationHref}>{activePlatformConfig.consultationEmail}</a>
@@ -1385,7 +1858,7 @@ export default function TuneAIApp() {
           <footer className="site-footer">
             <div>
               <strong>{activePlatformConfig.productName}</strong>
-              <span>© {new Date().getFullYear()} {activePlatformConfig.legalOwner}. Все права на self-host данные принадлежат владельцу развертывания.</span>
+              <span>© {new Date().getFullYear()} {activePlatformConfig.legalOwner}. Данные принадлежат владельцу развертывания.</span>
             </div>
             <nav aria-label="Ссылки в подвале">
               {activePlatformConfig.footerLinks.map((link) => (
@@ -1396,7 +1869,25 @@ export default function TuneAIApp() {
             </nav>
           </footer>
 
-          <div className="brand-wordmark" aria-hidden="true">{activePlatformConfig.productName.toLowerCase()}</div>
+          <div className="brand-wordmark" aria-hidden="true">{activePlatformConfig.logoText.toLowerCase()}</div>
+        </section>
+      </main>
+    );
+  }
+
+  if (user.must_change_password) {
+    return (
+      <main className="shell auth-shell" style={themeVars}>
+        <section className="auth-panel password-change-panel">
+          <div className="panel-title"><KeyRound size={18} /> Смена временного пароля</div>
+          <p className="muted">Администратор выдал временный пароль. Задайте новый пароль перед работой с тестами.</p>
+          {error && <div className="banner error">{error}</div>}
+          <form onSubmit={changeTemporaryPassword} className="stack">
+            <input name="current_password" type="password" placeholder="Текущий временный пароль" required />
+            <input name="new_password" type="password" placeholder="Новый пароль" required minLength={8} />
+            <button className="primary" type="submit"><KeyRound size={17} /> Сменить пароль</button>
+          </form>
+          <button className="ghost" onClick={clearAuth}><LogOut size={17} /> Выйти</button>
         </section>
       </main>
     );
@@ -1412,7 +1903,7 @@ export default function TuneAIApp() {
   ];
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" style={themeVars}>
       <aside className="sidebar">
         <div className="sidebar-top">
           <div>
@@ -1549,6 +2040,9 @@ export default function TuneAIApp() {
             selectedTest={selectedTest}
             onSelect={(test) => {
               setSelectedTest(test);
+              setGeneratedQuestions([]);
+              setQuestionGenerationMeta(null);
+              setCalibrationPreview(null);
               setMaterials([]);
               loadMaterials(test.id).catch(() => setMaterials([]));
             }}
@@ -1559,6 +2053,12 @@ export default function TuneAIApp() {
             onUploadSkill={uploadAISkill}
             onUpdateSkill={updateAISkill}
             onDeleteSkill={deleteAISkill}
+            generatedQuestions={generatedQuestions}
+            questionGenerationMeta={questionGenerationMeta}
+            calibrationPreview={calibrationPreview}
+            onGenerateQuestions={generateQuestionsFromRag}
+            onAddGeneratedQuestion={addGeneratedQuestion}
+            onPreviewCalibration={previewCalibration}
           />
         )}
 
@@ -1567,6 +2067,7 @@ export default function TuneAIApp() {
             user={user}
             tests={manageableTests}
             users={adminUsers}
+            groups={adminGroups}
             selectedTest={selectedTest}
             materials={materials}
             canManageSelectedTest={canManageSelectedTest}
@@ -1598,11 +2099,20 @@ export default function TuneAIApp() {
             tests={tests}
             attempts={adminAttempts}
             failedJobs={failedJobs}
+            systemHealth={systemHealth}
             aiProviders={aiProviders}
+            groups={adminGroups}
             materials={adminMaterials}
             materialTestId={adminMaterialTestId}
+            lastInvite={lastInvite}
+            lastPasswordReset={lastPasswordReset}
             onRefresh={refreshAdminData}
             onCreateUser={createAdminUser}
+            onCreateInvite={createInvite}
+            onImportUsersCsv={importUsersCsv}
+            onResetPassword={resetAdminPassword}
+            onCreateGroup={createGroup}
+            onAddGroupMember={addGroupMember}
             onUpdateUser={updateAdminUser}
             onUpdateTestStatus={updateAdminTestStatus}
             onDeleteTest={deleteAdminTest}
@@ -1819,7 +2329,13 @@ function BuilderPanel({
   onCreateSkill,
   onUploadSkill,
   onUpdateSkill,
-  onDeleteSkill
+  onDeleteSkill,
+  generatedQuestions,
+  questionGenerationMeta,
+  calibrationPreview,
+  onGenerateQuestions,
+  onAddGeneratedQuestion,
+  onPreviewCalibration
 }: {
   user: User;
   tests: Test[];
@@ -1833,12 +2349,23 @@ function BuilderPanel({
   onUploadSkill: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateSkill: (skill: AISkill, event: FormEvent<HTMLFormElement>) => Promise<void>;
   onDeleteSkill: (skill: AISkill) => Promise<void>;
+  generatedQuestions: GeneratedQuestionCandidate[];
+  questionGenerationMeta: QuestionGenerationResult | null;
+  calibrationPreview: CalibrationPreviewResult | null;
+  onGenerateQuestions: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onAddGeneratedQuestion: (candidate: GeneratedQuestionCandidate) => Promise<void>;
+  onPreviewCalibration: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 }) {
   const manageableSelected = selectedTest && tests.some((test) => test.id === selectedTest.id);
   const selectedSkillIds = selectedTest ? getSkillIds(selectedTest) : [];
 
   return (
     <section className="builder-layout">
+      <div className="builder-wizard" aria-label="Конструктор проверок">
+        {["Основное", "Вопросы", "Критерии", "RAG", "AI-оценщик", "Публикация"].map((step, index) => (
+          <span key={step}><b>{index + 1}</b>{step}</span>
+        ))}
+      </div>
       <TestPicker
         title="Мои сценарии"
         tests={tests}
@@ -1869,6 +2396,10 @@ function BuilderPanel({
             )}
           </select>
           <input name="competencies" placeholder="Компетенции через запятую: outbox, RAG, архитектура" />
+          <div className="settings-form mini">
+            <input name="organization_id" placeholder="ID организации" />
+            <input name="course_id" placeholder="ID курса" />
+          </div>
           <textarea name="rubric" placeholder="Критерии проверки" rows={3} defaultValue={DEFAULT_RUBRIC} />
           <div className="settings-form mini">
             <select name="agent_profile" defaultValue={DEFAULT_AGENT}>
@@ -1884,6 +2415,11 @@ function BuilderPanel({
             </select>
           </div>
           <SkillCheckboxGroup skills={skills} selectedIds={[]} />
+          <select name="answer_mode" defaultValue="both">
+            <option value="both">Ответ: голос или текст</option>
+            <option value="audio">Ответ: только голос</option>
+            <option value="text">Ответ: только текст</option>
+          </select>
           <textarea name="question" placeholder="Первый вопрос" rows={3} required />
           <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии проверки" rows={4} />
           <button className="primary" type="submit"><Plus size={17} /> Создать</button>
@@ -1940,12 +2476,25 @@ function BuilderPanel({
                 max={1}
                 step={0.01}
                 defaultValue={getCriteriaNumber(selectedTest, "review_confidence_threshold", 0.78)}
-                placeholder="Порог ревью AI"
+                placeholder="Порог ручной проверки"
               />
               <select name="material_policy" defaultValue={getCriteriaString(selectedTest, "material_policy", "test_and_question")}>
-                <option value="test_only">Материалы только на тест</option>
-                <option value="test_and_question">Материалы на тест и вопросы</option>
+                <option value="test_and_question">Тест + вопрос</option>
+                <option value="question_only">Только вопрос</option>
+                <option value="course_library">Библиотека курса</option>
+                <option value="organization_library">Библиотека организации</option>
+                <option value="none">Без RAG</option>
               </select>
+              <input
+                name="organization_id"
+                defaultValue={getCriteriaString(selectedTest, "organization_id", "")}
+                placeholder="ID организации"
+              />
+              <input
+                name="course_id"
+                defaultValue={getCriteriaString(selectedTest, "course_id", "")}
+                placeholder="ID курса"
+              />
               <SkillCheckboxGroup skills={skills} selectedIds={selectedSkillIds} />
               <input
                 name="time_limit_seconds"
@@ -1960,12 +2509,47 @@ function BuilderPanel({
 
             <div className="questions-manage">
               <div className="panel-title"><FileText size={18} /> Вопросы</div>
+              <form onSubmit={onGenerateQuestions} className="generation-form">
+                <select name="material_policy" defaultValue={getCriteriaString(selectedTest, "material_policy", "test_and_question")}>
+                  <option value="test_and_question">Тест + вопрос</option>
+                  <option value="question_only">Только вопрос</option>
+                  <option value="course_library">Библиотека курса</option>
+                  <option value="organization_library">Библиотека организации</option>
+                </select>
+                <input name="count" type="number" min={1} max={20} defaultValue={5} />
+                <input name="max_context_chunks" type="number" min={1} max={40} defaultValue={10} />
+                <input name="max_tokens_budget" type="number" min={300} max={8000} step={100} defaultValue={1400} />
+                <label className="inline-check"><input name="reuse_existing" type="checkbox" defaultChecked /> Reuse</label>
+                <button className="secondary" type="submit"><Database size={17} /> RAG вопросы</button>
+              </form>
+              {questionGenerationMeta && (
+                <p className="muted">
+                  Chunks: {questionGenerationMeta.source_chunk_count} · budget: {questionGenerationMeta.token_budget_estimate} · reuse: {questionGenerationMeta.reused_count}
+                </p>
+              )}
+              {generatedQuestions.length > 0 && (
+                <div className="generated-question-list">
+                  {generatedQuestions.map((candidate) => (
+                    <article key={candidate.text} className="generated-question">
+                      <strong>{candidate.text}</strong>
+                      <small>
+                        {QUESTION_ANSWER_MODE_LABELS[candidate.answer_mode]} · {candidate.reused ? "Уже есть похожий вопрос" : `novelty ${candidate.novelty_score}`}
+                      </small>
+                      <p>{candidate.source_excerpt}</p>
+                      <button className="secondary" type="button" onClick={() => onAddGeneratedQuestion(candidate)} disabled={candidate.reused}>
+                        <Plus size={15} /> Добавить
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
               <div className="questions">
                 {selectedTest.questions.map((question) => (
                   <div className="question" key={question.id}>
                     <div>
                       <strong>{question.text}</strong>
                       <small>Максимум: {question.max_score}</small>
+                      <span className="answer-mode-badge">{QUESTION_ANSWER_MODE_LABELS[question.answer_mode]}</span>
                     </div>
                   </div>
                 ))}
@@ -1976,9 +2560,48 @@ function BuilderPanel({
 	                <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии" rows={3} />
 	                <input name="competencies" placeholder="Компетенции вопроса через запятую" />
 	                <input name="max_score" type="number" min={1} step={1} defaultValue={10} />
+	                <select name="answer_mode" defaultValue="both">
+	                  <option value="both">Голос или текст</option>
+	                  <option value="audio">Только голос</option>
+	                  <option value="text">Только текст</option>
+	                </select>
 	                <button className="primary" type="submit"><Plus size={17} /> Добавить вопрос</button>
 	              </form>
             </div>
+
+            <section className="calibration-panel">
+              <div className="panel-title"><Activity size={18} /> Calibration Preview</div>
+              <form onSubmit={onPreviewCalibration} className="calibration-form">
+                <select name="skill_id" defaultValue={selectedSkillIds[0] || ""}>
+                  <option value="">Текущие критерии теста</option>
+                  {skills.filter((skill) => skill.is_active).map((skill) => (
+                    <option key={skill.id} value={skill.id}>{skill.name}</option>
+                  ))}
+                </select>
+                <select name="question_id" defaultValue={selectedTest.questions[0]?.id || ""}>
+                  {selectedTest.questions.map((question, index) => (
+                    <option key={question.id} value={question.id}>Вопрос {index + 1}</option>
+                  ))}
+                </select>
+                <textarea name="good_answer" rows={3} placeholder="Сильный ответ" />
+                <textarea name="medium_answer" rows={3} placeholder="Средний ответ" />
+                <textarea name="weak_answer" rows={3} placeholder="Слабый ответ" />
+                <button className="secondary" type="submit"><Activity size={17} /> Проверить</button>
+              </form>
+              {calibrationPreview && (
+                <div className="calibration-results">
+                  <p className="muted">Policy: {calibrationPreview.material_policy} · budget: {calibrationPreview.token_budget_estimate}</p>
+                  {calibrationPreview.items.map((item) => (
+                    <article key={item.label}>
+                      <strong>{item.label}: {item.score} / {item.max_score}</strong>
+                      <small>confidence {item.confidence}</small>
+                      <p>{item.feedback}</p>
+                      {item.manual_review_reason && <small>{item.manual_review_reason}</small>}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
           </>
         ) : (
           <EmptyState title="Выберите сценарий" text="После выбора можно менять статус, лимит времени и вопросы." />
@@ -2037,6 +2660,30 @@ function AISkillsPanel({
       <form onSubmit={onCreate} className="stack compact">
         <input name="name" placeholder="Название скилла" required minLength={2} />
         <input name="description" placeholder="Кратко: что меняет этот скилл" />
+        <div className="settings-form mini">
+          <select name="scenario" defaultValue="exam">
+            <option value="exam">Экзамен</option>
+            <option value="self_training">Тренировка</option>
+            <option value="interview">Интервью</option>
+          </select>
+          <select name="strictness" defaultValue="balanced">
+            <option value="soft">Мягко</option>
+            <option value="balanced">Баланс</option>
+            <option value="strict">Строго</option>
+          </select>
+          <input name="language" defaultValue="ru" />
+          <input name="score_scale" type="number" min={1} max={100} defaultValue={10} />
+          <input name="confidence_threshold" type="number" min={0} max={1} step={0.01} defaultValue={0.78} />
+          <select name="material_policy" defaultValue="test_and_question">
+            <option value="test_and_question">Тест + вопрос</option>
+            <option value="question_only">Только вопрос</option>
+            <option value="course_library">Библиотека курса</option>
+            <option value="organization_library">Библиотека организации</option>
+            <option value="none">Без RAG</option>
+          </select>
+        </div>
+        <textarea name="rubric_items" placeholder="factual_accuracy: 0.45&#10;completeness: 0.25" rows={3} />
+        <textarea name="instructions" placeholder="Оценивай только по материалам курса.&#10;Снижай балл за общие рассуждения без фактов." rows={3} />
         <textarea
           name="content"
           placeholder="Инструкция для проверки: на что обращать внимание, как снижать баллы, какой стиль обратной связи использовать"
@@ -2044,6 +2691,11 @@ function AISkillsPanel({
           required
           minLength={20}
         />
+        <div className="output-flags">
+          <label className="inline-check"><input name="require_sources" type="checkbox" defaultChecked /> Sources</label>
+          <label className="inline-check"><input name="require_recommendations" type="checkbox" defaultChecked /> Recommendations</label>
+          <label className="inline-check"><input name="require_manual_review_reason" type="checkbox" defaultChecked /> Review reason</label>
+        </div>
         <button className="primary" type="submit"><Plus size={17} /> Создать скилл</button>
       </form>
 
@@ -2066,7 +2718,36 @@ function AISkillsPanel({
             </div>
             <input name="name" defaultValue={skill.name} required minLength={2} />
             <input name="description" defaultValue={skill.description} placeholder="Описание" />
+            <div className="settings-form mini">
+              <select name="scenario" defaultValue={skill.scenario}>
+                <option value="exam">Экзамен</option>
+                <option value="self_training">Тренировка</option>
+                <option value="interview">Интервью</option>
+              </select>
+              <select name="strictness" defaultValue={skill.strictness}>
+                <option value="soft">Мягко</option>
+                <option value="balanced">Баланс</option>
+                <option value="strict">Строго</option>
+              </select>
+              <input name="language" defaultValue={skill.language} />
+              <input name="score_scale" type="number" min={1} max={100} defaultValue={skill.score_scale} />
+              <input name="confidence_threshold" type="number" min={0} max={1} step={0.01} defaultValue={skill.confidence_threshold} />
+              <select name="material_policy" defaultValue={skill.material_policy}>
+                <option value="test_and_question">Тест + вопрос</option>
+                <option value="question_only">Только вопрос</option>
+                <option value="course_library">Библиотека курса</option>
+                <option value="organization_library">Библиотека организации</option>
+                <option value="none">Без RAG</option>
+              </select>
+            </div>
+            <textarea name="rubric_items" defaultValue={formatRubricItems(skill)} rows={3} />
+            <textarea name="instructions" defaultValue={(skill.instructions || []).join("\n")} rows={3} />
             <textarea name="content" defaultValue={skill.content} rows={5} required minLength={20} />
+            <div className="output-flags">
+              <label className="inline-check"><input name="require_sources" type="checkbox" defaultChecked={skill.output_config?.require_sources !== false} /> Sources</label>
+              <label className="inline-check"><input name="require_recommendations" type="checkbox" defaultChecked={skill.output_config?.require_recommendations !== false} /> Recommendations</label>
+              <label className="inline-check"><input name="require_manual_review_reason" type="checkbox" defaultChecked={skill.output_config?.require_manual_review_reason !== false} /> Review reason</label>
+            </div>
             <div className="admin-actions">
               <button className="secondary" type="submit"><CheckCircle2 size={15} /> Сохранить</button>
               <button
@@ -2098,6 +2779,7 @@ function MaterialsAccessPanel({
   user,
   tests,
   users,
+  groups,
   selectedTest,
   materials,
   canManageSelectedTest,
@@ -2108,6 +2790,7 @@ function MaterialsAccessPanel({
   user: User;
   tests: Test[];
   users: User[];
+  groups: Group[];
   selectedTest: Test | null;
   materials: Material[];
   canManageSelectedTest: boolean;
@@ -2116,6 +2799,7 @@ function MaterialsAccessPanel({
   onAssign: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 }) {
   const assignableUsers = users.filter((item) => item.id !== user.id && item.is_active);
+  const assignableGroups = groups.filter((item) => item.members.length > 0);
 
   return (
     <section className="flow-grid">
@@ -2133,6 +2817,12 @@ function MaterialsAccessPanel({
             <div className="panel-title"><Database size={18} /> Материалы: {selectedTest.title}</div>
             <form onSubmit={onUploadMaterial} className="material-form">
               <input name="title" placeholder="Название материала" />
+              <select name="scope" defaultValue="test">
+                <option value="test">Весь тест</option>
+                <option value="question">Конкретный вопрос</option>
+                <option value="course">Библиотека курса</option>
+                <option value="organization">Библиотека организации</option>
+              </select>
               <select name="question_id" defaultValue="">
                 <option value="">Для всего теста</option>
                 {selectedTest.questions.map((question, index) => (
@@ -2141,7 +2831,9 @@ function MaterialsAccessPanel({
                   </option>
                 ))}
               </select>
-              <input name="file" type="file" accept=".txt,.md,text/plain,text/markdown" />
+              <input name="organization_id" defaultValue={getCriteriaString(selectedTest, "organization_id", "")} placeholder="ID организации" />
+              <input name="course_id" defaultValue={getCriteriaString(selectedTest, "course_id", "")} placeholder="ID курса" />
+              <input name="file" type="file" accept=".txt,.md,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
               <textarea name="content" placeholder="Вставьте конспект, лекцию или критерии проверки" rows={4} minLength={20} />
               <button className="secondary" type="submit"><Upload size={17} /> Добавить</button>
             </form>
@@ -2152,7 +2844,7 @@ function MaterialsAccessPanel({
 	                  <span key={material.id}>
 	                    {material.title}
 	                    <small>
-	                      {material.question_id && questionIndex >= 0 ? `Вопрос ${questionIndex + 1}` : "Весь тест"} · {MATERIAL_INDEX_LABELS[material.index_status]}
+	                      {material.question_id && questionIndex >= 0 ? `Вопрос ${questionIndex + 1}` : MATERIAL_SCOPE_LABELS[material.scope]} · {MATERIAL_INDEX_LABELS[material.index_status]} · v{material.version} · {material.chunk_count} chunks
 	                    </small>
 	                    {material.index_error && <small>{material.index_error}</small>}
 	                  </span>
@@ -2161,17 +2853,34 @@ function MaterialsAccessPanel({
               {!materials.length && <p className="muted">Материалы еще не добавлены.</p>}
             </div>
 
-            {assignableUsers.length > 0 && (
-              <form onSubmit={onAssign} className="assign-form">
-                <div className="panel-title"><Users size={18} /> Назначить участника</div>
-                <select name="user_id" required defaultValue="">
-                  <option value="" disabled>Выберите пользователя</option>
-                  {assignableUsers.map((item) => (
-                    <option key={item.id} value={item.id}>{item.full_name} · {ROLE_LABELS[item.role]}</option>
-                  ))}
-                </select>
-                <button className="primary" type="submit">Назначить</button>
-              </form>
+            {(assignableUsers.length > 0 || assignableGroups.length > 0) && (
+              <div className="assignment-grid">
+                {assignableUsers.length > 0 && (
+                  <form onSubmit={onAssign} className="assign-form">
+                    <div className="panel-title"><UserCheck size={18} /> Назначить участника</div>
+                    <select name="user_id" required defaultValue="">
+                      <option value="" disabled>Выберите пользователя</option>
+                      {assignableUsers.map((item) => (
+                        <option key={item.id} value={item.id}>{item.full_name} · {ROLE_LABELS[item.role]}</option>
+                      ))}
+                    </select>
+                    <button className="primary" type="submit">Назначить</button>
+                  </form>
+                )}
+
+                {assignableGroups.length > 0 && (
+                  <form onSubmit={onAssign} className="assign-form">
+                    <div className="panel-title"><Users size={18} /> Назначить группу</div>
+                    <select name="group_id" required defaultValue="">
+                      <option value="" disabled>Выберите группу</option>
+                      {assignableGroups.map((item) => (
+                        <option key={item.id} value={item.id}>{item.name} · {item.members.length} участн.</option>
+                      ))}
+                    </select>
+                    <button className="primary" type="submit">Назначить группу</button>
+                  </form>
+                )}
+              </div>
             )}
           </>
         ) : (
@@ -2237,8 +2946,10 @@ function TestRunner({
             <div>
               <strong>{question.text}</strong>
               <small>Максимум: {question.max_score}</small>
+              <span className="answer-mode-badge">{QUESTION_ANSWER_MODE_LABELS[question.answer_mode]}</span>
             </div>
             <AnswerSubmitter
+              answerMode={question.answer_mode}
               disabled={!attempt || Boolean(answerByQuestion.get(question.id))}
               onUpload={(blob) => onUpload(question.id, blob)}
               onTextSubmit={(text) => onTextSubmit(question.id, text)}
@@ -2265,11 +2976,13 @@ function TestRunner({
 }
 
 function AnswerSubmitter({
+  answerMode,
   disabled,
   onUpload,
   onTextSubmit,
   onError
 }: {
+  answerMode: QuestionAnswerMode;
   disabled: boolean;
   onUpload: (blob: Blob) => Promise<void>;
   onTextSubmit: (text: string) => Promise<void>;
@@ -2277,6 +2990,9 @@ function AnswerSubmitter({
 }) {
   const [mode, setMode] = useState<"audio" | "text">("audio");
   const [busy, setBusy] = useState(false);
+  const canUseAudio = answerMode !== "text";
+  const canUseText = answerMode !== "audio";
+  const activeMode = mode === "audio" && canUseAudio ? "audio" : canUseText ? "text" : "audio";
 
   async function submitText(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2300,10 +3016,24 @@ function AnswerSubmitter({
   return (
     <div className="answer-submit">
       <div className="segmented">
-        <button className={mode === "audio" ? "active" : ""} onClick={() => setMode("audio")} type="button">Голосом</button>
-        <button className={mode === "text" ? "active" : ""} onClick={() => setMode("text")} type="button">Текстом</button>
+        <button
+          className={activeMode === "audio" ? "active" : ""}
+          disabled={!canUseAudio}
+          onClick={() => setMode("audio")}
+          type="button"
+        >
+          Голосом
+        </button>
+        <button
+          className={activeMode === "text" ? "active" : ""}
+          disabled={!canUseText}
+          onClick={() => setMode("text")}
+          type="button"
+        >
+          Текстом
+        </button>
       </div>
-      {mode === "audio" ? (
+      {activeMode === "audio" ? (
         <Recorder disabled={disabled} onUpload={onUpload} onError={onError} />
       ) : (
         <form className="text-answer-form" onSubmit={submitText}>
@@ -2616,11 +3346,20 @@ function AdminPanel({
   tests,
   attempts,
   failedJobs,
+  systemHealth,
   aiProviders,
+  groups,
   materials,
   materialTestId,
+  lastInvite,
+  lastPasswordReset,
   onRefresh,
   onCreateUser,
+  onCreateInvite,
+  onImportUsersCsv,
+  onResetPassword,
+  onCreateGroup,
+  onAddGroupMember,
   onUpdateUser,
   onUpdateTestStatus,
   onDeleteTest,
@@ -2636,11 +3375,20 @@ function AdminPanel({
   tests: Test[];
   attempts: AdminAttempt[];
   failedJobs: AdminFailedJob[];
+  systemHealth: SystemHealth | null;
   aiProviders: AIProviderConfig[];
+  groups: Group[];
   materials: Material[];
   materialTestId: string;
+  lastInvite: UserInvite | null;
+  lastPasswordReset: PasswordReset | null;
   onRefresh: () => void;
   onCreateUser: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onCreateInvite: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onImportUsersCsv: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onResetPassword: (user: User) => Promise<void>;
+  onCreateGroup: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onAddGroupMember: (group: Group, event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateUser: (user: User, updates: Partial<Pick<User, "role" | "is_active">>) => Promise<void>;
   onUpdateTestStatus: (test: Test, status: Test["status"]) => Promise<void>;
   onDeleteTest: (test: Test) => Promise<void>;
@@ -2678,6 +3426,7 @@ function AdminPanel({
     return matchesStatus && matchesQuery;
   });
   const selectedMaterialTest = tests.find((item) => item.id === materialTestId);
+  const learnerUsers = users.filter((item) => item.is_active && ["student", "examinee", "candidate"].includes(item.role));
 
   return (
     <section className="panel full-panel admin-panel">
@@ -2715,6 +3464,20 @@ function AdminPanel({
       </div>
 
       <div className="admin-sections">
+        <section className="admin-table-wrap admin-wide">
+          <h3><HeartPulse size={17} /> Система</h3>
+          <div className="health-grid">
+            {(systemHealth?.checks || []).map((check) => (
+              <div className={`health-card ${check.status}`} key={check.name}>
+                <strong>{check.name}</strong>
+                <span>{check.status}</span>
+                <p>{check.detail}</p>
+              </div>
+            ))}
+            {!systemHealth && <p className="muted">Нажмите обновить, чтобы проверить backend, worker, RabbitMQ, storage, AI и Moodle.</p>}
+          </div>
+        </section>
+
         <AIProviderManager
           profiles={aiProviders}
           onCreate={onCreateAIProvider}
@@ -2724,7 +3487,75 @@ function AdminPanel({
         />
 
         <section className="admin-table-wrap admin-wide">
+          <h3><Users size={17} /> Группы и потоки</h3>
+          <form onSubmit={onCreateGroup} className="group-create-form">
+            <input name="name" placeholder="Название группы: 10А, Python поток, кандидаты backend" required minLength={2} />
+            <input name="description" placeholder="Описание или контекст группы" />
+            <button className="primary" type="submit"><Plus size={17} /> Создать группу</button>
+          </form>
+          <div className="group-list">
+            {groups.map((group) => {
+              const memberIds = new Set(group.members.map((member) => member.id));
+              const availableUsers = learnerUsers.filter((item) => !memberIds.has(item.id));
+              return (
+                <article className="group-card" key={group.id}>
+                  <div>
+                    <strong>{group.name}</strong>
+                    <p>{group.description || "Без описания"}</p>
+                    <small>{group.members.length ? group.members.map((member) => member.email).join(", ") : "Пока нет участников"}</small>
+                  </div>
+                  {availableUsers.length > 0 && (
+                    <form onSubmit={(event) => onAddGroupMember(group, event)}>
+                      <select name="user_id" required defaultValue="">
+                        <option value="" disabled>Добавить участника</option>
+                        {availableUsers.map((item) => (
+                          <option key={item.id} value={item.id}>{item.full_name} · {item.email}</option>
+                        ))}
+                      </select>
+                      <button className="secondary" type="submit"><UserCheck size={15} /> Добавить</button>
+                    </form>
+                  )}
+                </article>
+              );
+            })}
+            {!groups.length && <p className="muted">Создайте группу, чтобы назначать тест сразу классу, потоку или списку кандидатов.</p>}
+          </div>
+        </section>
+
+        <section className="admin-table-wrap admin-wide">
           <h3><Users size={17} /> Пользователи</h3>
+          <form onSubmit={onCreateInvite} className="admin-user-form invite-form">
+            <input name="full_name" placeholder="Имя для приглашения" required minLength={2} />
+            <input name="email" type="email" placeholder="Email" required />
+            <select name="role" defaultValue="examinee">
+              <option value="examinee">Экзаменуемый</option>
+              <option value="student">Самоподготовка</option>
+              <option value="candidate">Кандидат</option>
+              <option value="methodist">Методист</option>
+              <option value="teacher">Преподаватель</option>
+              <option value="interviewer">Интервьюер</option>
+              <option value="admin">Администратор</option>
+            </select>
+            <input name="expires_in_days" type="number" min={1} max={90} defaultValue={7} />
+            <button className="secondary" type="submit"><Mail size={17} /> Создать invite</button>
+          </form>
+          <form onSubmit={onImportUsersCsv} className="admin-user-form csv-form">
+            <input name="file" type="file" accept=".csv,text/csv" required />
+            <span className="muted">CSV: email, full_name, role, password</span>
+            <button className="secondary" type="submit"><Upload size={17} /> Импорт CSV</button>
+          </form>
+          {lastInvite && (
+            <div className="result-box">
+              <strong>Invite для {lastInvite.email}</strong>
+              <code>{lastInvite.invite_url}</code>
+            </div>
+          )}
+          {lastPasswordReset && (
+            <div className="result-box">
+              <strong>Временный пароль для {lastPasswordReset.user.email}</strong>
+              <code>{lastPasswordReset.temporary_password}</code>
+            </div>
+          )}
           <div className="admin-filters">
             <label>
               <Search size={15} />
@@ -2758,14 +3589,18 @@ function AdminPanel({
               <span key={`status-${item.id}`} className={`status-pill ${item.is_active ? "completed" : "failed"}`}>
                 {item.is_active ? "Активен" : "Заблокирован"}
               </span>,
-              <button
-                key={`active-${item.id}`}
-                className={item.is_active ? "danger" : "secondary"}
-                onClick={() => onUpdateUser(item, { is_active: !item.is_active })}
-              >
-                {item.is_active ? <Ban size={15} /> : <UserCheck size={15} />}
-                {item.is_active ? "Забанить" : "Разбанить"}
-              </button>
+              <span key={`user-actions-${item.id}`} className="admin-actions">
+                <button
+                  className={item.is_active ? "danger" : "secondary"}
+                  onClick={() => onUpdateUser(item, { is_active: !item.is_active })}
+                >
+                  {item.is_active ? <Ban size={15} /> : <UserCheck size={15} />}
+                  {item.is_active ? "Забанить" : "Разбанить"}
+                </button>
+                <button className="secondary" onClick={() => onResetPassword(item)}>
+                  <KeyRound size={15} /> Сброс
+                </button>
+              </span>
             ])}
             emptyText="Пользователи не найдены."
           />

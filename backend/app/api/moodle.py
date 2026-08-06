@@ -16,6 +16,7 @@ from app.models import (
     Attempt,
     MoodleSubmission,
     Question,
+    QuestionAnswerModeEnum,
     RoleEnum,
     Test,
     TestStatusEnum,
@@ -73,6 +74,7 @@ def get_manifest(
                         text=question.text,
                         order_index=question.order_index,
                         max_score=question.max_score,
+                        answer_mode=question.answer_mode,
                         competencies=question.competencies,
                     )
                     for question in sorted(test.questions, key=lambda item: item.order_index)
@@ -93,6 +95,8 @@ def submit_text(
     if existing:
         return _serialize_moodle_submission(db, existing)
     test, question = _load_published_test_question(db, payload.test_id, payload.question_id, payload.methodist_email)
+    if question.answer_mode == QuestionAnswerModeEnum.audio:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Text answers are disabled for this question")
     user = _get_or_create_moodle_user(db, payload)
     _ensure_assignment(db, test, user)
     attempt = _get_or_create_attempt(db, test.id, user.id, payload.external_attempt_id)
@@ -153,6 +157,8 @@ async def submit_audio(
         text="audio",
     )
     test, question = _load_published_test_question(db, test_id, question_id, payload.methodist_email)
+    if question.answer_mode == QuestionAnswerModeEnum.text:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Audio answers are disabled for this question")
     user = _get_or_create_moodle_user(db, payload)
     _ensure_assignment(db, test, user)
     attempt = _get_or_create_attempt(db, test.id, user.id, external_attempt_id)

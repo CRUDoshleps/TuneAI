@@ -4,6 +4,8 @@ export type Role = "student" | "examinee" | "candidate" | "methodist" | "teacher
 export type TestStatus = "draft" | "published" | "archived";
 export type TestType = "exam" | "self_training" | "interview";
 export type QuestionCompetency = { name: string; weight: number };
+export type QuestionAnswerMode = "audio" | "text" | "both";
+export type RubricCriterion = { name: string; weight: number };
 export type AnswerStatus =
   | "uploaded"
   | "queued_for_transcription"
@@ -58,10 +60,20 @@ export type User = {
   full_name: string;
   role: Role;
   is_active: boolean;
+  must_change_password: boolean;
   is_demo?: boolean;
   expires_at?: string | null;
   created_by_id?: string | null;
   created_at?: string;
+};
+
+export type Group = {
+  id: string;
+  name: string;
+  description: string;
+  created_by_id: string;
+  created_at: string;
+  members: Array<Pick<User, "id" | "email" | "full_name" | "role" | "is_active">>;
 };
 
 export type Question = {
@@ -69,6 +81,7 @@ export type Question = {
   text: string;
   expected_answer: string;
   competencies: QuestionCompetency[];
+  answer_mode: QuestionAnswerMode;
   order_index: number;
   max_score: number;
 };
@@ -77,6 +90,7 @@ export type AttemptQuestion = {
   id: string;
   text: string;
   competencies: QuestionCompetency[];
+  answer_mode: QuestionAnswerMode;
   order_index: number;
   max_score: number;
 };
@@ -101,6 +115,15 @@ export type AISkill = {
   name: string;
   description: string;
   content: string;
+  scenario: TestType;
+  language: string;
+  strictness: "soft" | "balanced" | "strict";
+  score_scale: number;
+  confidence_threshold: number;
+  material_policy: MaterialPolicy;
+  rubric: RubricCriterion[];
+  instructions: string[];
+  output_config: Record<string, unknown>;
   source_filename: string | null;
   owner_id: string;
   is_active: boolean;
@@ -199,13 +222,56 @@ export type Attempt = {
 
 export type Material = {
   id: string;
-  test_id: string;
+  organization_id: string | null;
+  course_id: string | null;
+  test_id: string | null;
   question_id: string | null;
   title: string;
   source_filename: string | null;
-  index_status: "pending" | "indexed" | "failed";
+  content_type: string;
+  scope: "organization" | "course" | "test" | "question";
+  version: number;
+  index_status: "uploaded" | "parsing" | "chunking" | "embedding" | "pending" | "indexed" | "failed";
   index_error: string | null;
+  chunk_count: number;
   created_at: string;
+};
+
+export type MaterialPolicy = "test_and_question" | "question_only" | "course_library" | "organization_library" | "none";
+
+export type GeneratedQuestionCandidate = {
+  text: string;
+  expected_answer: string;
+  competencies: QuestionCompetency[];
+  answer_mode: QuestionAnswerMode;
+  max_score: number;
+  source_excerpt: string;
+  novelty_score: number;
+  reused: boolean;
+};
+
+export type QuestionGenerationResult = {
+  questions: GeneratedQuestionCandidate[];
+  reused_count: number;
+  source_chunk_count: number;
+  token_budget_estimate: number;
+  fingerprint: string;
+};
+
+export type CalibrationPreviewResult = {
+  skill_id: string | null;
+  material_policy: MaterialPolicy;
+  items: Array<{
+    label: string;
+    score: number;
+    max_score: number;
+    confidence: number;
+    feedback: string;
+    source_excerpts: string[];
+    manual_review_reason: string | null;
+  }>;
+  token_budget_estimate: number;
+  reused_rag_context: boolean;
 };
 
 export type AdminDashboard = {
@@ -242,6 +308,30 @@ export type AdminFailedJob = {
   test_title: string | null;
   error_message: string;
   created_at: string | null;
+};
+
+export type SystemHealth = {
+  checks: Array<{
+    name: string;
+    status: "ok" | "warning" | "error";
+    detail: string;
+  }>;
+  generated_at: string;
+};
+
+export type UserInvite = {
+  id: string;
+  email: string;
+  full_name: string;
+  role: Role;
+  invite_url: string;
+  expires_at: string;
+  accepted_at: string | null;
+};
+
+export type PasswordReset = {
+  user: User;
+  temporary_password: string;
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -309,6 +399,8 @@ const detailMessages: Record<string, string> = {
   "Attempt already has answers for all questions": "Все вопросы в этой попытке уже отвечены.",
   "Question is not revealed yet": "Этот вопрос пока закрыт. Отвечайте на вопросы по порядку.",
   "Question already has an answer": "Ответ на этот вопрос уже отправлен.",
+  "Text answers are disabled for this question": "На этот вопрос нужно ответить голосом.",
+  "Audio answers are disabled for this question": "На этот вопрос нужно ответить текстом.",
   "Attempt not found": "Попытка не найдена.",
   "Answer not found": "Ответ не найден.",
   "Only test owner or admin can review answers": "Проверять ответ может только автор теста или администратор.",
@@ -316,10 +408,17 @@ const detailMessages: Record<string, string> = {
   "Review score exceeds maximum": "Итоговый балл не может быть выше максимума за вопрос.",
   "Test is not assigned to this user": "Этот экзамен не назначен вашему аккаунту.",
   "Only text material is supported": "Загрузите материал в формате TXT или Markdown.",
+  "Only text PDF DOCX or Markdown material is supported": "Загрузите материал в формате TXT, Markdown, PDF или DOCX.",
+  "PDF parser is not installed": "На backend не установлен парсер PDF.",
+  "DOCX parser is not installed": "На backend не установлен парсер DOCX.",
+  "Only test creators can manage material library": "У вашей роли нет прав на библиотеку материалов.",
   "Material file is too large": "Материал слишком большой. Загрузите файл до 5 МБ.",
   "Unsupported audio type": "Формат записи не поддерживается. Попробуйте записать ответ еще раз.",
   "Audio file is too large": "Запись слишком большая. Сделайте ответ короче и отправьте снова.",
-  "Too many requests": "Слишком много действий подряд. Подождите немного и попробуйте снова."
+  "Too many requests": "Слишком много действий подряд. Подождите немного и попробуйте снова.",
+  "Password change required": "Нужно сменить временный пароль.",
+  "Invalid current password": "Текущий пароль указан неверно.",
+  "Invite not found or expired": "Приглашение не найдено или срок действия истек."
 };
 
 const statusMessages: Record<number, string> = {

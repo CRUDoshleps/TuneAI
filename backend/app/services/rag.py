@@ -33,6 +33,8 @@ async def create_material_chunks(db: Session, material: Material, ai: TuneAIClie
         embedding = await ai.embed_document(chunk)
         row = MaterialChunk(
             material_id=material.id,
+            organization_id=material.organization_id,
+            course_id=material.course_id,
             test_id=material.test_id,
             question_id=material.question_id,
             chunk_index=index,
@@ -41,6 +43,8 @@ async def create_material_chunks(db: Session, material: Material, ai: TuneAIClie
         )
         db.add(row)
         chunks.append(row)
+    material.chunk_count = len(chunks)
+    db.add(material)
     return chunks
 
 
@@ -49,8 +53,14 @@ async def index_material(db: Session, material_id: str, ai: TuneAIClient | None 
     if material is None:
         raise ValueError(f"Material {material_id} not found")
     try:
-        material.index_status = MaterialIndexStatusEnum.pending
+        material.index_status = MaterialIndexStatusEnum.parsing
         material.index_error = None
+        db.add(material)
+        db.commit()
+        material.index_status = MaterialIndexStatusEnum.chunking
+        db.add(material)
+        db.commit()
+        material.index_status = MaterialIndexStatusEnum.embedding
         db.add(material)
         db.commit()
         await create_material_chunks(db, material, ai)
@@ -74,16 +84,12 @@ async def retrieve_context(
     question_id: str | None = None,
     query: str,
     limit: int = 5,
+    material_policy: str = "test_and_question",
     ai: TuneAIClient | None = None,
 ) -> list[str]:
-    stmt = select(MaterialChunk).join(Material).where(
-        MaterialChunk.test_id == test_id,
-        Material.index_status == MaterialIndexStatusEnum.indexed,
-    )
-    if question_id:
-        stmt = stmt.where(or_(MaterialChunk.question_id.is_(None), MaterialChunk.question_id == question_id))
-    else:
-        stmt = stmt.where(MaterialChunk.question_id.is_(None))
+    if material_policy == "none":
+        return []
+    stmt = _context_query(db, test_id=test_id, question_id=question_id, material_policy=material_policy)
     rows = list(db.scalars(stmt).all())
     if not rows:
         return []
@@ -92,6 +98,48 @@ async def retrieve_context(
     scored = [(_cosine(query_embedding, row.embedding), row.text) for row in rows]
     scored.sort(key=lambda item: item[0], reverse=True)
     return [text for score, text in scored[:limit] if score > -1]
+
+
+def material_chunks_for_policy(
+    db: Session,
+    *,
+    test_id: str,
+    question_id: str | None = None,
+    material_policy: str = "test_and_question",
+) -> list[MaterialChunk]:
+    if material_policy == "none":
+        return []
+    return list(db.scalars(_context_query(db, test_id=test_id, question_id=question_id, material_policy=material_policy)).all())
+
+
+def _context_query(db: Session, *, test_id: str, question_id: str | None, material_policy: str):
+    from app.models import Test
+
+    test = db.get(Test, test_id)
+    criteria = test.criteria if test else {}
+    course_id = _criteria_string(criteria, "course_id")
+    organization_id = _criteria_string(criteria, "organization_id")
+    stmt = select(MaterialChunk).join(Material).where(Material.index_status == MaterialIndexStatusEnum.indexed)
+    if material_policy == "question_only":
+        return stmt.where(MaterialChunk.test_id == test_id, MaterialChunk.question_id == question_id)
+    if material_policy == "course_library":
+        linked = [MaterialChunk.test_id == test_id]
+        if course_id:
+            linked.append(MaterialChunk.course_id == course_id)
+        return stmt.where(or_(*linked))
+    if material_policy == "organization_library":
+        linked = [MaterialChunk.test_id == test_id]
+        if organization_id:
+            linked.append(MaterialChunk.organization_id == organization_id)
+        elif course_id:
+            linked.append(MaterialChunk.course_id == course_id)
+        return stmt.where(or_(*linked))
+    if question_id:
+        return stmt.where(
+            MaterialChunk.test_id == test_id,
+            or_(MaterialChunk.question_id.is_(None), MaterialChunk.question_id == question_id),
+        )
+    return stmt.where(MaterialChunk.test_id == test_id, MaterialChunk.question_id.is_(None))
 
 
 def _cosine(left: list[float], right: list[float]) -> float:
@@ -104,3 +152,8 @@ def _cosine(left: list[float], right: list[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return dot / (left_norm * right_norm)
+
+
+def _criteria_string(criteria: dict | None, key: str) -> str | None:
+    value = (criteria or {}).get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None

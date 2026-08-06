@@ -4,8 +4,8 @@
 
 - Moodle: подробная инструкция в [moodle.md](moodle.md);
 - другие LMS;
-- отдельные self-host сайты с тестами;
-- встраиваемый frontend-клиент для внешних сайтов: подробная инструкция в [site-integration.md](site-integration.md).
+- отдельные self-host инстансы с тестами;
+- widget `/widget` или API для внешних сайтов: подробная инструкция в [site-integration.md](site-integration.md).
 
 ## Пилот
 
@@ -22,5 +22,5 @@
 
 ## Документация по направлениям
 
-- [Интеграция TuneAI во внешние сайты](site-integration.md)
+- [Интеграция во внешние сайты и widget](site-integration.md)
 - [Интеграция с Moodle](moodle.md)

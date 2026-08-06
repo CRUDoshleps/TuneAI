@@ -53,6 +53,7 @@ services:
     volumes:
       - moodle-html-data:/var/www/html
       - moodledata-data:/var/www/moodledata
+      - ./integrations/moodle/local_tuneai:/var/www/html/public/local/tuneai:ro
       - ./tests/moodle:/tuneai-moodle-tests:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/login/index.php >/dev/null"]
