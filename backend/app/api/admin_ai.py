@@ -6,6 +6,7 @@ from app.db.session import get_db
 from app.deps import require_roles
 from app.models import AIProviderConfig, AIProviderEnum, RoleEnum, User
 from app.schemas import AIProviderConfigCreate, AIProviderConfigRead, AIProviderConfigUpdate
+from app.services.audit import record_audit
 
 
 router = APIRouter(prefix="/admin/ai-providers", tags=["admin"])
@@ -39,6 +40,7 @@ def create_ai_provider(
     db.flush()
     if payload.is_active:
         _activate_provider(db, profile)
+    record_audit(db, actor=user, action="ai_provider.create", entity_type="ai_provider", entity_id=profile.id, details={"provider": profile.provider.value})
     db.commit()
     db.refresh(profile)
     return _serialize_provider(profile)
@@ -49,7 +51,7 @@ def update_ai_provider(
     provider_id: str,
     payload: AIProviderConfigUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(RoleEnum.admin)),
+    user: User = Depends(require_roles(RoleEnum.admin)),
 ) -> AIProviderConfigRead:
     profile = db.get(AIProviderConfig, provider_id)
     if not profile:
@@ -70,6 +72,7 @@ def update_ai_provider(
         else:
             profile.is_active = False
     db.add(profile)
+    record_audit(db, actor=user, action="ai_provider.update", entity_type="ai_provider", entity_id=profile.id)
     db.commit()
     db.refresh(profile)
     return _serialize_provider(profile)
@@ -79,12 +82,13 @@ def update_ai_provider(
 def activate_ai_provider(
     provider_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(RoleEnum.admin)),
+    user: User = Depends(require_roles(RoleEnum.admin)),
 ) -> AIProviderConfigRead:
     profile = db.get(AIProviderConfig, provider_id)
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI provider config not found")
     _activate_provider(db, profile)
+    record_audit(db, actor=user, action="ai_provider.activate", entity_type="ai_provider", entity_id=profile.id)
     db.commit()
     db.refresh(profile)
     return _serialize_provider(profile)
@@ -94,11 +98,12 @@ def activate_ai_provider(
 def delete_ai_provider(
     provider_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(RoleEnum.admin)),
+    user: User = Depends(require_roles(RoleEnum.admin)),
 ) -> None:
     profile = db.get(AIProviderConfig, provider_id)
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI provider config not found")
+    record_audit(db, actor=user, action="ai_provider.delete", entity_type="ai_provider", entity_id=profile.id)
     db.delete(profile)
     db.commit()
 

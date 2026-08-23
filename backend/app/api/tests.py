@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.deps import can_create_tests, get_current_user
-from app.models import AISkill, Answer, Assignment, Attempt, Group, GroupMembership, Material, Question, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
+from app.models import AISkill, Answer, Assignment, Attempt, Group, GroupMembership, Material, Question, QuestionTypeEnum, RoleEnum, Test, TestStatusEnum, TestTypeEnum, User
 from app.schemas import (
     AssignRequest,
     CalibrationPreviewRead,
@@ -29,6 +29,7 @@ from app.services.ai_provider_runtime import get_active_ai_client
 from app.services.ai_skills import load_skill_instructions, skill_ids_from_criteria
 from app.services.question_generation import generate_questions_from_rag
 from app.services.rag import retrieve_context
+from app.services.audit import record_audit
 
 
 router = APIRouter(prefix="/tests", tags=["tests"])
@@ -72,6 +73,11 @@ def create_test(
             Question(
                 text=censor_text(question.text),
                 expected_answer=censor_text(question.expected_answer),
+                question_type=question.question_type,
+                options=[item.model_dump() for item in question.options],
+                correct_option_ids=question.correct_option_ids,
+                explanation=censor_text(question.explanation),
+                source_refs=[item.model_dump() for item in question.source_refs],
                 competencies=[item.model_dump() for item in question.competencies],
                 answer_mode=question.answer_mode,
                 order_index=question.order_index,
@@ -79,6 +85,8 @@ def create_test(
             )
         )
     db.add(test)
+    db.flush()
+    record_audit(db, actor=user, action="assessment.create", entity_type="test", entity_id=test.id, details={"title": test.title, "type": test.test_type.value})
     db.commit()
     db.refresh(test)
     return _serialize_test(_load_test(db, test.id), user)
@@ -112,6 +120,7 @@ def update_test(
             value = _validated_criteria(db, value, user)
         setattr(test, field, value)
     db.add(test)
+    record_audit(db, actor=user, action="assessment.update", entity_type="test", entity_id=test.id, details={"fields": list(payload.model_dump(exclude_unset=True))})
     db.commit()
     return _serialize_test(_load_test(db, test.id), user)
 
@@ -129,12 +138,19 @@ def add_question(
         test_id=test.id,
         text=censor_text(payload.text),
         expected_answer=censor_text(payload.expected_answer),
+        question_type=payload.question_type,
+        options=[item.model_dump() for item in payload.options],
+        correct_option_ids=payload.correct_option_ids,
+        explanation=censor_text(payload.explanation),
+        source_refs=[item.model_dump() for item in payload.source_refs],
         competencies=[item.model_dump() for item in payload.competencies],
         answer_mode=payload.answer_mode,
         order_index=payload.order_index,
         max_score=payload.max_score,
     )
     db.add(question)
+    db.flush()
+    record_audit(db, actor=user, action="question.create", entity_type="question", entity_id=question.id, details={"test_id": test.id, "type": question.question_type.value})
     db.commit()
     db.refresh(question)
     return question
@@ -153,13 +169,21 @@ def update_question(
     question = db.get(Question, question_id)
     if not question or question.test_id != test.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    merged_type = updates.get("question_type", question.question_type)
+    merged_options = updates.get("options", question.options or [])
+    merged_correct_ids = updates.get("correct_option_ids", question.correct_option_ids or [])
+    _validate_choice_question(merged_type, merged_options, merged_correct_ids)
+    for field, value in updates.items():
         if field in {"text", "expected_answer"} and value is not None:
+            value = censor_text(value)
+        elif field == "explanation" and value is not None:
             value = censor_text(value)
         elif field == "competencies" and value is not None:
             value = [{"name": str(item["name"]).strip(), "weight": float(item["weight"])} for item in value]
         setattr(question, field, value)
     db.add(question)
+    record_audit(db, actor=user, action="question.update", entity_type="question", entity_id=question.id, details={"test_id": test.id, "fields": list(updates)})
     db.commit()
     db.refresh(question)
     return question
@@ -183,6 +207,7 @@ def delete_question(
     for material in list(db.scalars(select(Material).where(Material.question_id == question.id)).all()):
         db.delete(material)
     db.delete(question)
+    record_audit(db, actor=user, action="question.delete", entity_type="question", entity_id=question.id, details={"test_id": test.id})
     db.commit()
 
 
@@ -207,6 +232,7 @@ def reorder_questions(
     for index, question_id in enumerate(payload.question_ids):
         by_id[question_id].order_index = index
         db.add(by_id[question_id])
+    record_audit(db, actor=user, action="question.reorder", entity_type="test", entity_id=test.id, details={"question_ids": payload.question_ids})
     db.commit()
     return _serialize_test(_load_test(db, test.id), user)
 
@@ -227,6 +253,7 @@ def assign_test(
         if target.role not in {RoleEnum.student, RoleEnum.examinee, RoleEnum.candidate} or target.created_by_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managed learner users can be assigned")
     db.add(Assignment(test_id=test.id, user_id=target.id, created_by_id=user.id))
+    record_audit(db, actor=user, action="assessment.assign", entity_type="test", entity_id=test.id, details={"user_id": target.id})
     try:
         db.commit()
     except IntegrityError:
@@ -258,6 +285,7 @@ def assign_test_group(
             continue
         db.add(Assignment(test_id=test.id, user_id=member_id, created_by_id=user.id))
         assigned_count += 1
+    record_audit(db, actor=user, action="assessment.assign_group", entity_type="test", entity_id=test.id, details={"group_id": group.id, "assigned_count": assigned_count})
     db.commit()
     return GroupAssignRead(
         group_id=group.id,
@@ -427,6 +455,19 @@ def _skill_threshold(db: Session, skill_id: str | None, fallback: float) -> floa
         return fallback
     skill = db.get(AISkill, skill_id)
     return skill.confidence_threshold if skill else fallback
+
+
+def _validate_choice_question(question_type: QuestionTypeEnum | str, options: list[dict], correct_ids: list[str]) -> None:
+    value = question_type.value if isinstance(question_type, QuestionTypeEnum) else str(question_type)
+    if value == QuestionTypeEnum.open_response.value:
+        return
+    option_ids = [str(item.get("id") or "") for item in options]
+    if len(options) < 2 or len(option_ids) != len(set(option_ids)):
+        raise HTTPException(status_code=422, detail="Закрытому вопросу нужны минимум два варианта с уникальными ID")
+    if not correct_ids or not set(correct_ids).issubset(option_ids):
+        raise HTTPException(status_code=422, detail="Правильные ответы должны ссылаться на варианты вопроса")
+    if value == QuestionTypeEnum.single_choice.value and len(correct_ids) != 1:
+        raise HTTPException(status_code=422, detail="Для одиночного выбора нужен один правильный ответ")
 
 
 def _ensure_manager(test: Test, user: User) -> None:

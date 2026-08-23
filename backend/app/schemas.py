@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from app.models import AIProviderEnum, AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, MaterialIndexStatusEnum, MaterialScopeEnum, QuestionAnswerModeEnum, RoleEnum, TestStatusEnum, TestTypeEnum
+from app.models import AIProviderEnum, AnswerStatusEnum, AnswerTypeEnum, AttemptStatusEnum, MaterialIndexStatusEnum, MaterialScopeEnum, QuestionAnswerModeEnum, QuestionTypeEnum, RoleEnum, SourceImportStatusEnum, TestStatusEnum, TestTypeEnum
 
 
 class TokenPair(BaseModel):
@@ -125,18 +125,44 @@ class SkillOutputConfig(BaseModel):
     require_manual_review_reason: bool = True
 
 
+class QuestionOption(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class SourceReference(BaseModel):
+    source_import_id: str | None = None
+    segment_id: str
+    label: str = ""
+
+
 class QuestionCreate(BaseModel):
     text: str = Field(min_length=5)
     expected_answer: str = ""
+    question_type: QuestionTypeEnum = QuestionTypeEnum.open_response
+    options: list[QuestionOption] = Field(default_factory=list)
+    correct_option_ids: list[str] = Field(default_factory=list)
+    explanation: str = ""
+    source_refs: list[SourceReference] = Field(default_factory=list)
     competencies: list[QuestionCompetency] = []
     answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
     order_index: int = 0
     max_score: float = Field(default=10, gt=0)
 
+    @model_validator(mode="after")
+    def validate_options(self):
+        _validate_question_options(self.question_type, self.options, self.correct_option_ids)
+        return self
+
 
 class QuestionUpdate(BaseModel):
     text: str | None = Field(default=None, min_length=5)
     expected_answer: str | None = None
+    question_type: QuestionTypeEnum | None = None
+    options: list[QuestionOption] | None = None
+    correct_option_ids: list[str] | None = None
+    explanation: str | None = None
+    source_refs: list[SourceReference] | None = None
     competencies: list[QuestionCompetency] | None = None
     answer_mode: QuestionAnswerModeEnum | None = None
     order_index: int | None = None
@@ -151,6 +177,11 @@ class QuestionRead(BaseModel):
     id: str
     text: str
     expected_answer: str
+    question_type: QuestionTypeEnum = QuestionTypeEnum.open_response
+    options: list[QuestionOption] = Field(default_factory=list)
+    correct_option_ids: list[str] = Field(default_factory=list)
+    explanation: str = ""
+    source_refs: list[SourceReference] = Field(default_factory=list)
     competencies: list[QuestionCompetency] = []
     answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
     order_index: int
@@ -162,6 +193,8 @@ class QuestionRead(BaseModel):
 class AttemptQuestionRead(BaseModel):
     id: str
     text: str
+    question_type: QuestionTypeEnum = QuestionTypeEnum.open_response
+    options: list[QuestionOption] = Field(default_factory=list)
     competencies: list[QuestionCompetency] = []
     answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
     order_index: int
@@ -311,6 +344,7 @@ class AnswerRead(BaseModel):
     answer_type: AnswerTypeEnum = AnswerTypeEnum.audio
     status: AnswerStatusEnum
     text_response: str | None = None
+    selected_option_ids: list[str] = Field(default_factory=list)
     transcript: str | None = None
     evaluation: dict[str, Any] | None = None
     score: float | None = None
@@ -341,6 +375,10 @@ class AttemptRead(BaseModel):
 
 class TextAnswerRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
+
+
+class ChoiceAnswerRequest(BaseModel):
+    selected_option_ids: list[str] = Field(min_length=1, max_length=50)
 
 
 class AnswerResultRead(BaseModel):
@@ -537,6 +575,11 @@ class MaterialRead(BaseModel):
 class GeneratedQuestionCandidate(BaseModel):
     text: str
     expected_answer: str = ""
+    question_type: QuestionTypeEnum = QuestionTypeEnum.open_response
+    options: list[QuestionOption] = Field(default_factory=list)
+    correct_option_ids: list[str] = Field(default_factory=list)
+    explanation: str = ""
+    source_refs: list[SourceReference] = Field(default_factory=list)
     competencies: list[QuestionCompetency] = []
     answer_mode: QuestionAnswerModeEnum = QuestionAnswerModeEnum.both
     max_score: float = 10
@@ -663,6 +706,9 @@ class AdminDashboard(BaseModel):
     answers_completed: int
     answers_failed: int
     outbox_pending: int
+    attempts_completed: int = 0
+    average_score_percent: float = 0
+    review_pending: int = 0
 
 
 class AdminAttemptRead(BaseModel):
@@ -701,3 +747,62 @@ class SystemHealthCheck(BaseModel):
 class SystemHealthRead(BaseModel):
     checks: list[SystemHealthCheck]
     generated_at: datetime
+
+
+class SourceSegmentRead(BaseModel):
+    id: str
+    index: int
+    title: str = ""
+    text: str = ""
+    notes: str = ""
+
+
+class SourceImportGenerateRequest(BaseModel):
+    count: int = Field(default=8, ge=1, le=30)
+    difficulty: Literal["easy", "balanced", "hard"] = "balanced"
+    language: str = Field(default="ru", min_length=2, max_length=12)
+    question_types: list[QuestionTypeEnum] = Field(default_factory=lambda: [QuestionTypeEnum.open_response, QuestionTypeEnum.single_choice])
+    excluded_segment_ids: list[str] = Field(default_factory=list)
+
+
+class SourceImportRead(BaseModel):
+    id: str
+    test_id: str
+    owner_id: str
+    source_filename: str
+    content_type: str
+    status: SourceImportStatusEnum
+    segments: list[SourceSegmentRead] = Field(default_factory=list)
+    excluded_segment_ids: list[str] = Field(default_factory=list)
+    generation_config: dict[str, Any] = Field(default_factory=dict)
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AuditLogRead(BaseModel):
+    id: str
+    actor_id: str | None = None
+    actor_email: str | None = None
+    action: str
+    entity_type: str
+    entity_id: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+def _validate_question_options(question_type: QuestionTypeEnum, options: list[QuestionOption], correct_ids: list[str]) -> None:
+    if question_type == QuestionTypeEnum.open_response:
+        return
+    if len(options) < 2:
+        raise ValueError("Choice questions require at least two options")
+    option_ids = [item.id for item in options]
+    if len(option_ids) != len(set(option_ids)):
+        raise ValueError("Option ids must be unique")
+    if not correct_ids or not set(correct_ids).issubset(option_ids):
+        raise ValueError("Correct option ids must reference available options")
+    if question_type == QuestionTypeEnum.single_choice and len(correct_ids) != 1:
+        raise ValueError("Single choice question requires exactly one correct option")

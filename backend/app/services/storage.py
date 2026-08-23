@@ -33,6 +33,13 @@ class StorageService:
         path = Path(self.settings.upload_dir) / object_key
         return path.read_bytes()
 
+    def save_source(self, source_id: str, filename: str, content_type: str, content: bytes) -> str:
+        suffix = Path(filename).suffix.lower() or ".bin"
+        object_key = f"sources/{source_id}{suffix}"
+        if self.settings.storage_backend == "s3":
+            return self._save_s3(object_key, content_type or "application/octet-stream", content)
+        return self._save_local(object_key, content)
+
     def _save_local(self, object_key: str, content: bytes) -> str:
         path = Path(self.settings.upload_dir) / object_key
         path.parent.mkdir(parents=True, exist_ok=True)

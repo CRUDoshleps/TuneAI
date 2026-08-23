@@ -67,12 +67,28 @@ class AnswerStatusEnum(str, enum.Enum):
 class AnswerTypeEnum(str, enum.Enum):
     audio = "audio"
     text = "text"
+    choice = "choice"
 
 
 class QuestionAnswerModeEnum(str, enum.Enum):
     audio = "audio"
     text = "text"
     both = "both"
+
+
+class QuestionTypeEnum(str, enum.Enum):
+    open_response = "open_response"
+    single_choice = "single_choice"
+    multiple_choice = "multiple_choice"
+
+
+class SourceImportStatusEnum(str, enum.Enum):
+    uploaded = "uploaded"
+    ready = "ready"
+    queued = "queued"
+    generating = "generating"
+    completed = "completed"
+    failed = "failed"
 
 
 class MaterialIndexStatusEnum(str, enum.Enum):
@@ -192,6 +208,13 @@ class Question(Base):
     test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     expected_answer: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    question_type: Mapped[QuestionTypeEnum] = mapped_column(
+        Enum(QuestionTypeEnum), default=QuestionTypeEnum.open_response, nullable=False
+    )
+    options: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    correct_option_ids: Mapped[list[str]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    source_refs: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
     competencies: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
     answer_mode: Mapped[QuestionAnswerModeEnum] = mapped_column(
         Enum(QuestionAnswerModeEnum),
@@ -301,6 +324,7 @@ class Answer(Base):
     audio_object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     audio_content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     text_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_option_ids: Mapped[list[str]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     evaluation: Mapped[dict[str, Any] | None] = mapped_column(MutableDict.as_mutable(json_type()), nullable=True)
@@ -361,6 +385,30 @@ class MaterialChunk(Base):
     material: Mapped[Material] = relationship(back_populates="chunks")
 
 
+class SourceImport(Base):
+    __tablename__ = "source_imports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    test_id: Mapped[str] = mapped_column(ForeignKey("tests.id"), nullable=False, index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    source_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    status: Mapped[SourceImportStatusEnum] = mapped_column(
+        Enum(SourceImportStatusEnum), default=SourceImportStatusEnum.uploaded, nullable=False, index=True
+    )
+    segments: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    excluded_segment_ids: Mapped[list[str]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    generation_config: Mapped[dict[str, Any]] = mapped_column(MutableDict.as_mutable(json_type()), default=dict, nullable=False)
+    candidates: Mapped[list[dict[str, Any]]] = mapped_column(MutableList.as_mutable(json_type()), default=list, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+    test: Mapped[Test] = relationship()
+    owner: Mapped[User] = relationship()
+
+
 class GeneratedQuestionCache(Base):
     __tablename__ = "generated_question_cache"
     __table_args__ = (UniqueConstraint("test_id", "fingerprint", name="uq_generated_question_cache_test_fingerprint"),)
@@ -405,3 +453,17 @@ class OutboxEvent(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    actor_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    entity_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    details: Mapped[dict[str, Any]] = mapped_column(MutableDict.as_mutable(json_type()), default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+    actor: Mapped[User | None] = relationship()

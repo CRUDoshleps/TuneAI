@@ -14,6 +14,7 @@ from app.models import (
     Attempt,
     Question,
     QuestionAnswerModeEnum,
+    QuestionTypeEnum,
     RoleEnum,
     Test,
     User,
@@ -26,6 +27,7 @@ from app.schemas import (
     AttemptRead,
     AttemptResultRead,
     AttemptStartRequest,
+    ChoiceAnswerRequest,
     TextAnswerRequest,
     ReviewQueueItem,
 )
@@ -33,6 +35,7 @@ from app.services.processing import _refresh_attempt_totals
 from app.services.outbox import ANSWER_UPLOADED, add_outbox_event
 from app.services.storage import StorageService
 from app.services.access_control import can_manage_test, can_take_test
+from app.services.audit import record_audit
 
 
 router = APIRouter(prefix="/attempts", tags=["attempts"])
@@ -158,6 +161,8 @@ async def upload_answer_audio(
     question = db.get(Question, question_id)
     if not question or question.test_id != attempt.test_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    if question.question_type != QuestionTypeEnum.open_response:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Этот вопрос принимает выбор варианта")
     if question.answer_mode == QuestionAnswerModeEnum.text:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Audio answers are disabled for this question")
     existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
@@ -211,6 +216,8 @@ async def submit_text_answer(
     question = db.get(Question, question_id)
     if not question or question.test_id != attempt.test_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
+    if question.question_type != QuestionTypeEnum.open_response:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Этот вопрос принимает выбор варианта")
     if question.answer_mode == QuestionAnswerModeEnum.audio:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Text answers are disabled for this question")
     existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
@@ -240,6 +247,73 @@ async def submit_text_answer(
         aggregate_id=answer.id,
         payload={"answer_id": answer.id, "attempt_id": attempt.id, "question_id": question.id},
     )
+    db.commit()
+    ANSWERS_CREATED.inc()
+    return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
+
+
+@router.post("/{attempt_id}/questions/{question_id}/choices", response_model=AttemptRead, status_code=status.HTTP_201_CREATED)
+def submit_choice_answer(
+    attempt_id: str,
+    question_id: str,
+    payload: ChoiceAnswerRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AttemptRead:
+    attempt = _load_attempt(db, attempt_id)
+    if attempt.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Only attempt owner can upload answers")
+    question = db.get(Question, question_id)
+    if not question or question.test_id != attempt.test_id:
+        raise HTTPException(status_code=404, detail="Question not found in this test")
+    if question.question_type == QuestionTypeEnum.open_response:
+        raise HTTPException(status_code=403, detail="Этот вопрос принимает текстовый или голосовой ответ")
+    existing = _existing_answer(db, attempt.id, question.id, idempotency_key)
+    if existing and idempotency_key and existing.idempotency_key == idempotency_key:
+        return _serialize_attempt(db, attempt, user)
+    if existing and existing.status != AnswerStatusEnum.failed:
+        raise HTTPException(status_code=409, detail="Question already has an answer")
+    if not _can_manage_attempt(attempt, user):
+        current_question = _current_answerable_question(db, attempt)
+        if current_question is None or current_question.id != question.id:
+            raise HTTPException(status_code=403, detail="Question is not revealed yet")
+    option_ids = {str(item.get("id")) for item in (question.options or [])}
+    selected = list(dict.fromkeys(payload.selected_option_ids))
+    if not set(selected).issubset(option_ids):
+        raise HTTPException(status_code=422, detail="Выбран неизвестный вариант")
+    if question.question_type == QuestionTypeEnum.single_choice and len(selected) != 1:
+        raise HTTPException(status_code=422, detail="Выберите один вариант")
+    correct = set(question.correct_option_ids or [])
+    is_correct = set(selected) == correct
+    option_text = {str(item.get("id")): str(item.get("text") or "") for item in (question.options or [])}
+    answer = existing or Answer(id=new_id(), attempt_id=attempt.id, question_id=question.id)
+    answer.answer_type = AnswerTypeEnum.choice
+    answer.idempotency_key = idempotency_key
+    answer.selected_option_ids = selected
+    answer.text_response = None
+    answer.transcript = "; ".join(option_text[item] for item in selected)
+    answer.score = question.max_score if is_correct else 0
+    answer.max_score = question.max_score
+    answer.status = AnswerStatusEnum.completed
+    answer.error_message = None
+    answer.evaluation = {
+        "score": answer.score,
+        "max_score": question.max_score,
+        "correct_points": [question.explanation or "Ответ выбран верно"] if is_correct else [],
+        "mistakes": [] if is_correct else ["Выбран неверный набор вариантов"],
+        "missing_points": [] if is_correct else [option_text[item] for item in correct if item not in selected],
+        "feedback": question.explanation or ("Верно" if is_correct else "Проверьте материал и попробуйте снова в следующей попытке"),
+        "recommendations": "Перейдите к следующему вопросу" if is_correct else "Повторите связанный раздел материала",
+        "confidence": 1.0,
+        "source_excerpts": [],
+        "grounded": bool(question.source_refs),
+        "review_recommended": False,
+        "evaluation_version": "deterministic-choice-v1",
+    }
+    db.add(answer)
+    db.commit()
+    _refresh_attempt_totals(db, attempt)
     db.commit()
     ANSWERS_CREATED.inc()
     return _serialize_attempt(db, _load_attempt(db, attempt.id), user)
@@ -275,6 +349,7 @@ def review_answer(
     answer.reviewed_by_id = reviewer.id
     answer.reviewed_at = datetime.now(timezone.utc)
     db.add(answer)
+    record_audit(db, actor=reviewer, action="answer.review", entity_type="answer", entity_id=answer.id, details={"attempt_id": attempt_id, "score": payload.score})
     db.commit()
     db.refresh(answer)
     _refresh_attempt_totals(db, answer.attempt)
@@ -369,6 +444,8 @@ def _serialize_attempt(db: Session, attempt: Attempt, user: User) -> AttemptRead
             AttemptQuestionRead(
                 id=question.id,
                 text=question.text,
+                question_type=question.question_type,
+                options=question.options or [],
                 competencies=question.competencies or [],
                 answer_mode=question.answer_mode,
                 order_index=question.order_index,
@@ -422,6 +499,8 @@ def _serialize_attempt_result(db: Session, attempt: Attempt, user: User) -> Atte
             AttemptQuestionRead(
                 id=question.id,
                 text=question.text,
+                question_type=question.question_type,
+                options=question.options or [],
                 competencies=question.competencies or [],
                 answer_mode=question.answer_mode,
                 order_index=question.order_index,
