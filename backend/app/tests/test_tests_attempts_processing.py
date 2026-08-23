@@ -151,7 +151,7 @@ async def test_audio_upload_creates_outbox_event_and_processing_completes(client
     upload = client.post(
         f"/attempts/{attempt['id']}/questions/{test['questions'][0]['id']}/audio",
         headers=auth_header(admin_token),
-        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake webm audio bytes", "audio/webm")},
     )
     assert upload.status_code == 201, upload.text
     answer = upload.json()["answers"][0]
@@ -240,7 +240,7 @@ async def test_teacher_reviews_low_confidence_answer_and_overrides_attempt_total
     upload = client.post(
         f"/attempts/{attempt['id']}/questions/{test['questions'][0]['id']}/audio",
         headers=auth_header(student_token),
-        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm;codecs=opus")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake webm audio bytes", "audio/webm;codecs=opus")},
     )
     assert upload.status_code == 201, upload.text
     answer_id = upload.json()["answers"][0]["id"]
@@ -319,7 +319,7 @@ def test_questions_are_hidden_until_attempt_reveals_them(client):
     premature_upload = client.post(
         f"/attempts/{attempt['id']}/questions/{second_question_id}/audio",
         headers=auth_header(student_token),
-        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake webm audio bytes", "audio/webm")},
     )
     assert premature_upload.status_code == 403
     assert premature_upload.json()["detail"] == "Question is not revealed yet"
@@ -327,14 +327,14 @@ def test_questions_are_hidden_until_attempt_reveals_them(client):
     first_upload = client.post(
         f"/attempts/{attempt['id']}/questions/{first_question_id}/audio",
         headers={**auth_header(student_token), "Idempotency-Key": "first-audio-answer"},
-        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake webm audio bytes", "audio/webm")},
     )
     assert first_upload.status_code == 201, first_upload.text
     assert [question["id"] for question in first_upload.json()["questions"]] == [first_question_id, second_question_id]
     replay = client.post(
         f"/attempts/{attempt['id']}/questions/{first_question_id}/audio",
         headers={**auth_header(student_token), "Idempotency-Key": "first-audio-answer"},
-        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake webm audio bytes", "audio/webm")},
     )
     assert replay.status_code == 201
     assert replay.json()["answers"][0]["id"] == first_upload.json()["answers"][0]["id"]
@@ -400,7 +400,7 @@ def test_question_answer_modes_control_text_and_audio_submission(client):
     allowed_audio = client.post(
         f"/attempts/{attempt['id']}/questions/{audio_only_id}/audio",
         headers=auth_header(admin_token),
-        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake webm audio bytes", "audio/webm")},
     )
     assert allowed_audio.status_code == 201, allowed_audio.text
     answers_by_question = {answer["question_id"]: answer for answer in allowed_audio.json()["answers"]}
@@ -409,7 +409,7 @@ def test_question_answer_modes_control_text_and_audio_submission(client):
     blocked_audio = client.post(
         f"/attempts/{attempt['id']}/questions/{text_only_id}/audio",
         headers=auth_header(admin_token),
-        files={"file": ("answer.webm", b"fake webm audio bytes", "audio/webm")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake webm audio bytes", "audio/webm")},
     )
     assert blocked_audio.status_code == 403
     assert blocked_audio.json()["detail"] == "Audio answers are disabled for this question"

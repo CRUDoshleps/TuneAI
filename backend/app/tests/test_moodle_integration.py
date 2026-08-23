@@ -2,7 +2,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models import Answer, AnswerTypeEnum, Assignment, MoodleSubmission, RoleEnum, User
+from app.models import Answer, AnswerTypeEnum, Assignment, Attempt, MoodleSubmission, MoodleUserLink, RoleEnum, User
 from app.services.processing import process_answer_uploaded
 from app.tests.conftest import auth_header, register_and_login
 
@@ -11,7 +11,12 @@ def _enable_moodle(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "moodle_integration_enabled", True)
     monkeypatch.setattr(settings, "moodle_integration_token", "moodle-secret")
-    return {"X-TuneAI-Integration-Key": "moodle-secret"}
+    monkeypatch.setattr(settings, "moodle_integration_site_id", "test-moodle")
+    monkeypatch.setattr(settings, "moodle_integration_owner_emails", [])
+    return {
+        "X-TuneAI-Integration-Key": "moodle-secret",
+        "X-TuneAI-Moodle-Site": "test-moodle",
+    }
 
 
 def _create_published_test(client):
@@ -74,6 +79,18 @@ def test_moodle_integration_requires_enabled_token(client, monkeypatch):
     invalid = client.post("/integrations/moodle/submissions/text", headers={"X-TuneAI-Integration-Key": "bad"}, json=payload)
     assert invalid.status_code == 401
 
+    monkeypatch.setattr(settings, "moodle_integration_site_id", "trusted-moodle")
+    wrong_site = client.post(
+        "/integrations/moodle/submissions/text",
+        headers={
+            "X-TuneAI-Integration-Key": "moodle-secret",
+            "X-TuneAI-Moodle-Site": "another-moodle",
+        },
+        json=payload,
+    )
+    assert wrong_site.status_code == 401
+    assert wrong_site.json()["detail"] == "Moodle site identifier is not trusted"
+
 
 def test_moodle_text_submission_replays_and_returns_teacher_signal(client, monkeypatch):
     headers = _enable_moodle(monkeypatch)
@@ -98,6 +115,7 @@ def test_moodle_text_submission_replays_and_returns_teacher_signal(client, monke
     submitted = client.post("/integrations/moodle/submissions/text", headers=headers, json=payload)
     assert submitted.status_code == 201, submitted.text
     body = submitted.json()
+    assert body["moodle_site_id"] == "test-moodle"
     assert body["answer_status"] == "queued_for_transcription"
     assert body["result_ready"] is False
     assert body["max_score"] == 10
@@ -153,7 +171,7 @@ def test_moodle_audio_submission_creates_audio_answer(client, monkeypatch):
             "test_id": test["id"],
             "question_id": test["questions"][0]["id"],
         },
-        files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake audio bytes", "audio/webm")},
     )
     assert submitted.status_code == 201, submitted.text
     assert submitted.json()["moodle_group_id"] == "group-audio"
@@ -247,7 +265,7 @@ def test_moodle_submission_respects_question_answer_mode(client, monkeypatch):
             "test_id": test["id"],
             "question_id": test["questions"][1]["id"],
         },
-        files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
+        files={"file": ("answer.webm", b"\x1a\x45\xdf\xa3fake audio bytes", "audio/webm")},
     )
     assert blocked_audio.status_code == 403
     assert blocked_audio.json()["detail"] == "Audio answers are disabled for this question"
@@ -271,6 +289,194 @@ def test_moodle_submission_rejects_wrong_methodist_scope(client, monkeypatch):
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Test does not belong to the requested methodist"
+
+
+def test_moodle_retake_creates_a_new_attempt_for_the_same_question(client, monkeypatch):
+    headers = _enable_moodle(monkeypatch)
+    test = _create_published_test(client)
+    base = {
+        "moodle_user_id": "retake-user",
+        "user_email": "retake@example.edu",
+        "user_full_name": "Retake Student",
+        "test_id": test["id"],
+        "question_id": test["questions"][0]["id"],
+        "text": "The event is stored atomically and published later.",
+    }
+
+    first = client.post(
+        "/integrations/moodle/submissions/text",
+        headers=headers,
+        json={**base, "external_submission_id": "retake-1", "external_attempt_id": "quiz-attempt-1"},
+    )
+    second = client.post(
+        "/integrations/moodle/submissions/text",
+        headers=headers,
+        json={**base, "external_submission_id": "retake-2", "external_attempt_id": "quiz-attempt-2"},
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["attempt_id"] != second.json()["attempt_id"]
+    assert first.json()["answer_id"] != second.json()["answer_id"]
+
+
+def test_moodle_identity_is_stable_when_email_changes(client, monkeypatch):
+    headers = _enable_moodle(monkeypatch)
+    test = _create_published_test(client)
+    base = {
+        "moodle_user_id": "stable-user-42",
+        "user_full_name": "Stable Student",
+        "test_id": test["id"],
+        "question_id": test["questions"][0]["id"],
+        "text": "Transactional outbox answer.",
+    }
+    first = client.post(
+        "/integrations/moodle/submissions/text",
+        headers=headers,
+        json={
+            **base,
+            "external_submission_id": "identity-1",
+            "external_attempt_id": "identity-attempt-1",
+            "user_email": "old-address@example.edu",
+        },
+    )
+    second = client.post(
+        "/integrations/moodle/submissions/text",
+        headers=headers,
+        json={
+            **base,
+            "external_submission_id": "identity-2",
+            "external_attempt_id": "identity-attempt-2",
+            "user_email": "new-address@example.edu",
+        },
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    with SessionLocal() as db:
+        first_submission = db.scalar(select(MoodleSubmission).where(MoodleSubmission.external_submission_id == "identity-1"))
+        second_submission = db.scalar(select(MoodleSubmission).where(MoodleSubmission.external_submission_id == "identity-2"))
+        link = db.scalar(select(MoodleUserLink).where(MoodleUserLink.moodle_user_id == "stable-user-42"))
+        assert first_submission.user_id == second_submission.user_id == link.user_id
+        assert link.email == "new-address@example.edu"
+
+
+def test_moodle_rejects_collision_with_staff_identity(client, monkeypatch):
+    headers = _enable_moodle(monkeypatch)
+    test = _create_published_test(client)
+    response = client.post(
+        "/integrations/moodle/submissions/text",
+        headers=headers,
+        json={
+            "external_submission_id": "staff-collision",
+            "moodle_user_id": "staff-user",
+            "user_email": "admin@example.com",
+            "user_full_name": "Moodle Admin Collision",
+            "test_id": test["id"],
+            "question_id": test["questions"][0]["id"],
+            "text": "Must not attach to a TuneAI administrator.",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Moodle email is already used by another TuneAI identity"
+
+    admin_token = register_and_login(client, "admin@example.com")
+    native = client.post(
+        "/users",
+        headers=auth_header(admin_token),
+        json={
+            "email": "native-examinee@example.edu",
+            "full_name": "Native Examinee",
+            "password": "password123",
+            "role": "examinee",
+        },
+    )
+    assert native.status_code == 201, native.text
+    native_collision = client.post(
+        "/integrations/moodle/submissions/text",
+        headers=headers,
+        json={
+            "external_submission_id": "native-collision",
+            "moodle_user_id": "native-user",
+            "user_email": "native-examinee@example.edu",
+            "user_full_name": "Moodle Native Collision",
+            "test_id": test["id"],
+            "question_id": test["questions"][0]["id"],
+            "text": "Must not attach to a native TuneAI examinee.",
+        },
+    )
+    assert native_collision.status_code == 409
+
+
+def test_moodle_manual_review_clears_signal_and_sets_final_result(client, monkeypatch):
+    headers = _enable_moodle(monkeypatch)
+    test = _create_published_test(client)
+    payload = {
+        "external_submission_id": "manual-review-submission",
+        "external_attempt_id": "manual-review-attempt",
+        "moodle_user_id": "review-user",
+        "user_email": "review-user@example.edu",
+        "user_full_name": "Review Student",
+        "test_id": test["id"],
+        "question_id": test["questions"][0]["id"],
+        "text": "The outbox transaction stores the event and data together.",
+    }
+    submitted = client.post("/integrations/moodle/submissions/text", headers=headers, json=payload)
+    assert submitted.status_code == 201, submitted.text
+    with SessionLocal() as db:
+        awaitable_process(db, submitted.json()["answer_id"])
+
+    reviewed = client.post(
+        "/integrations/moodle/submissions/manual-review-submission/review",
+        headers=headers,
+        json={
+            "score": 8.5,
+            "feedback": "Approved by the Moodle teacher.",
+            "reviewer_moodle_user_id": "7",
+            "reviewer_name": "Moodle Teacher",
+        },
+    )
+
+    assert reviewed.status_code == 200, reviewed.text
+    body = reviewed.json()
+    assert body["score"] == 8.5
+    assert body["feedback"] == "Approved by the Moodle teacher."
+    assert body["review_required"] is False
+    assert body["review_reason"] is None
+    assert body["teacher_signal"] == "none"
+    with SessionLocal() as db:
+        submission = db.scalar(select(MoodleSubmission).where(MoodleSubmission.external_submission_id == "manual-review-submission"))
+        attempt = db.get(Attempt, submission.attempt_id)
+        assert submission.reviewer_moodle_user_id == "7"
+        assert submission.reviewer_name == "Moodle Teacher"
+        assert attempt.total_score == 8.5
+
+
+def test_moodle_owner_allowlist_scopes_manifest_and_submissions(client, monkeypatch):
+    headers = _enable_moodle(monkeypatch)
+    test = _create_published_test(client)
+    monkeypatch.setattr(get_settings(), "moodle_integration_owner_emails", ["allowed@example.edu"])
+
+    manifest = client.get("/integrations/moodle/manifest", headers=headers)
+    assert manifest.status_code == 200
+    assert manifest.json()["tests"] == []
+
+    response = client.post(
+        "/integrations/moodle/submissions/text",
+        headers=headers,
+        json={
+            "external_submission_id": "owner-not-allowed",
+            "moodle_user_id": "owner-scope-user",
+            "user_email": "owner-scope@example.edu",
+            "user_full_name": "Owner Scope Student",
+            "test_id": test["id"],
+            "question_id": test["questions"][0]["id"],
+            "text": "This owner is outside the integration allowlist.",
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Test owner is not allowed for Moodle integration"
 
 
 def awaitable_process(db, answer_id):

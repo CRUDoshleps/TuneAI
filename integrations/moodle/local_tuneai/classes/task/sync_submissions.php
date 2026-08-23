@@ -1,4 +1,6 @@
 <?php
+// This file is part of Moodle - http://moodle.org/. Licensed under GNU GPL v3 or later.
+
 namespace local_tuneai\task;
 
 defined('MOODLE_INTERNAL') || die();

@@ -608,6 +608,7 @@ class MoodleTextSubmissionRequest(BaseModel):
 
 
 class MoodleSubmissionRead(BaseModel):
+    moodle_site_id: str
     external_submission_id: str
     external_attempt_id: str | None = None
     moodle_course_id: str | None = None
@@ -630,6 +631,13 @@ class MoodleSubmissionRead(BaseModel):
     review_reason: str | None = None
     teacher_signal: Literal["none", "review_recommended", "processing_failed"] = "none"
     transcript: str | None = None
+
+
+class MoodleSubmissionReviewRequest(BaseModel):
+    score: float = Field(ge=0)
+    feedback: str = Field(min_length=1, max_length=10000)
+    reviewer_moodle_user_id: str = Field(min_length=1, max_length=255)
+    reviewer_name: str = Field(min_length=2, max_length=255)
 
 
 class MoodleManifestQuestion(BaseModel):

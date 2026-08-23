@@ -1,4 +1,6 @@
 <?php
+// This file is part of Moodle - http://moodle.org/. Licensed under GNU GPL v3 or later.
+
 namespace local_tuneai;
 
 defined('MOODLE_INTERNAL') || die();
@@ -8,11 +10,20 @@ require_once($CFG->libdir . '/filelib.php');
 class client {
     private string $baseurl;
     private string $integrationkey;
+    private string $siteid;
     private int $timeout;
 
-    public function __construct(?string $baseurl = null, ?string $integrationkey = null, ?int $timeout = null) {
+    public function __construct(
+        ?string $baseurl = null,
+        ?string $integrationkey = null,
+        ?int $timeout = null,
+        ?string $siteid = null
+    ) {
+        global $CFG;
         $this->baseurl = rtrim($baseurl ?? (string) get_config('local_tuneai', 'baseurl'), '/');
         $this->integrationkey = $integrationkey ?? (string) get_config('local_tuneai', 'integrationkey');
+        $configuredsiteid = (string) get_config('local_tuneai', 'siteid');
+        $this->siteid = $siteid ?? ($configuredsiteid !== '' ? $configuredsiteid : hash('sha256', (string) $CFG->wwwroot));
         $this->timeout = $timeout ?? (int) (get_config('local_tuneai', 'timeout') ?: 20);
     }
 
@@ -43,6 +54,7 @@ class client {
         }
         $curl = new \curl();
         $curl->setHeader('X-TuneAI-Integration-Key: ' . $this->integrationkey);
+        $curl->setHeader('X-TuneAI-Moodle-Site: ' . $this->siteid);
         $curl->setopt(['CURLOPT_TIMEOUT' => $this->timeout]);
         $fields = [];
         foreach ($payload as $key => $value) {
@@ -65,6 +77,14 @@ class client {
         return $this->request('GET', '/integrations/moodle/submissions/' . rawurlencode($externalsubmissionid) . '/result', []);
     }
 
+    public function review(string $externalsubmissionid, array $payload): array {
+        return $this->request(
+            'POST',
+            '/integrations/moodle/submissions/' . rawurlencode($externalsubmissionid) . '/review',
+            $payload
+        );
+    }
+
     private function request(string $method, string $path, array $payload): array {
         if ((int) get_config('local_tuneai', 'enabled') !== 1) {
             throw new \moodle_exception('TuneAI is disabled');
@@ -74,6 +94,7 @@ class client {
         }
         $curl = new \curl();
         $curl->setHeader('X-TuneAI-Integration-Key: ' . $this->integrationkey);
+        $curl->setHeader('X-TuneAI-Moodle-Site: ' . $this->siteid);
         $curl->setHeader('Content-Type: application/json');
         $curl->setopt(['CURLOPT_TIMEOUT' => $this->timeout]);
         $url = $this->baseurl . $path;

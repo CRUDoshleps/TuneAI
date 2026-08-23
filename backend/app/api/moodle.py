@@ -1,7 +1,9 @@
 import secrets
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
@@ -15,6 +17,7 @@ from app.models import (
     Assignment,
     Attempt,
     MoodleSubmission,
+    MoodleUserLink,
     Question,
     QuestionAnswerModeEnum,
     RoleEnum,
@@ -23,21 +26,39 @@ from app.models import (
     User,
     new_id,
 )
-from app.schemas import MoodleManifestQuestion, MoodleManifestRead, MoodleManifestTest, MoodleSubmissionRead, MoodleTextSubmissionRequest
+from app.schemas import (
+    MoodleManifestQuestion,
+    MoodleManifestRead,
+    MoodleManifestTest,
+    MoodleSubmissionRead,
+    MoodleSubmissionReviewRequest,
+    MoodleTextSubmissionRequest,
+)
 from app.services.outbox import ANSWER_UPLOADED, add_outbox_event
+from app.services.processing import _refresh_attempt_totals
 from app.services.storage import StorageService
 
 
 router = APIRouter(prefix="/integrations/moodle", tags=["moodle"])
 
 
-def require_moodle_key(x_tuneai_integration_key: str | None = Header(default=None, alias="X-TuneAI-Integration-Key")) -> None:
+def require_moodle_key(
+    x_tuneai_integration_key: str | None = Header(default=None, alias="X-TuneAI-Integration-Key"),
+    x_tuneai_moodle_site: str | None = Header(default=None, alias="X-TuneAI-Moodle-Site"),
+) -> str:
     settings = get_settings()
     if not settings.moodle_integration_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodle integration is disabled")
     expected = settings.moodle_integration_token
     if not expected or not x_tuneai_integration_key or not secrets.compare_digest(x_tuneai_integration_key, expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Moodle integration token")
+    site_id = (x_tuneai_moodle_site or settings.moodle_integration_site_id).strip()
+    if not site_id or len(site_id) > 120:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Moodle site identifier")
+    expected_site_id = settings.moodle_integration_site_id.strip()
+    if expected_site_id != "default" and not secrets.compare_digest(site_id, expected_site_id):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Moodle site identifier is not trusted")
+    return site_id
 
 
 @router.get("/manifest", response_model=MoodleManifestRead)
@@ -45,7 +66,7 @@ def get_manifest(
     methodist_email: str | None = Query(default=None, max_length=255),
     test_id: str | None = Query(default=None, max_length=36),
     db: Session = Depends(get_db),
-    _: None = Depends(require_moodle_key),
+    _: str = Depends(require_moodle_key),
 ) -> MoodleManifestRead:
     statement = (
         select(Test)
@@ -55,8 +76,13 @@ def get_manifest(
     )
     if test_id:
         statement = statement.where(Test.id == test_id)
+    allowed_owners = [email.lower() for email in get_settings().moodle_integration_owner_emails]
+    if methodist_email or allowed_owners:
+        statement = statement.join(User, Test.owner_id == User.id)
     if methodist_email:
-        statement = statement.join(User, Test.owner_id == User.id).where(User.email == methodist_email.lower())
+        statement = statement.where(User.email == methodist_email.lower())
+    if allowed_owners:
+        statement = statement.where(User.email.in_(allowed_owners))
     tests = db.scalars(statement).all()
     return MoodleManifestRead(
         tests=[
@@ -89,17 +115,17 @@ def get_manifest(
 def submit_text(
     payload: MoodleTextSubmissionRequest,
     db: Session = Depends(get_db),
-    _: None = Depends(require_moodle_key),
+    moodle_site_id: str = Depends(require_moodle_key),
 ) -> MoodleSubmissionRead:
-    existing = _load_existing_submission(db, payload.external_submission_id)
+    existing = _load_existing_submission(db, moodle_site_id, payload.external_submission_id)
     if existing:
         return _serialize_moodle_submission(db, existing)
     test, question = _load_published_test_question(db, payload.test_id, payload.question_id, payload.methodist_email)
     if question.answer_mode == QuestionAnswerModeEnum.audio:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Text answers are disabled for this question")
-    user = _get_or_create_moodle_user(db, payload)
+    user = _get_or_create_moodle_user(db, payload, moodle_site_id)
     _ensure_assignment(db, test, user)
-    attempt = _get_or_create_attempt(db, test.id, user.id, payload.external_attempt_id)
+    attempt = _get_or_create_attempt(db, test.id, user.id, moodle_site_id, payload.external_attempt_id)
     answer = _create_answer(
         db,
         attempt=attempt,
@@ -111,11 +137,19 @@ def submit_text(
     submission = _create_submission(
         db,
         payload=payload,
+        moodle_site_id=moodle_site_id,
         user=user,
         attempt=attempt,
         answer=answer,
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _load_existing_submission(db, moodle_site_id, payload.external_submission_id)
+        if existing:
+            return _serialize_moodle_submission(db, existing)
+        raise
     ANSWERS_CREATED.inc()
     return _serialize_moodle_submission(db, submission)
 
@@ -136,9 +170,9 @@ async def submit_audio(
     methodist_email: str | None = Form(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _: None = Depends(require_moodle_key),
+    moodle_site_id: str = Depends(require_moodle_key),
 ) -> MoodleSubmissionRead:
-    existing = _load_existing_submission(db, external_submission_id)
+    existing = _load_existing_submission(db, moodle_site_id, external_submission_id)
     if existing:
         return _serialize_moodle_submission(db, existing)
     payload = MoodleTextSubmissionRequest(
@@ -159,10 +193,10 @@ async def submit_audio(
     test, question = _load_published_test_question(db, test_id, question_id, payload.methodist_email)
     if question.answer_mode == QuestionAnswerModeEnum.text:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Audio answers are disabled for this question")
-    user = _get_or_create_moodle_user(db, payload)
+    user = _get_or_create_moodle_user(db, payload, moodle_site_id)
     _ensure_assignment(db, test, user)
-    attempt = _get_or_create_attempt(db, test.id, user.id, external_attempt_id)
-    content = await file.read()
+    attempt = _get_or_create_attempt(db, test.id, user.id, moodle_site_id, external_attempt_id)
+    content = await file.read(get_settings().max_upload_bytes + 1)
     answer_id = new_id()
     object_key = StorageService().save_audio(answer_id, file, content)
     answer = _create_answer(
@@ -175,8 +209,22 @@ async def submit_audio(
         audio_content_type=file.content_type,
         answer_id=answer_id,
     )
-    submission = _create_submission(db, payload=payload, user=user, attempt=attempt, answer=answer)
-    db.commit()
+    submission = _create_submission(
+        db,
+        payload=payload,
+        moodle_site_id=moodle_site_id,
+        user=user,
+        attempt=attempt,
+        answer=answer,
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _load_existing_submission(db, moodle_site_id, external_submission_id)
+        if existing:
+            return _serialize_moodle_submission(db, existing)
+        raise
     ANSWERS_CREATED.inc()
     return _serialize_moodle_submission(db, submission)
 
@@ -185,16 +233,54 @@ async def submit_audio(
 def get_submission_result(
     external_submission_id: str,
     db: Session = Depends(get_db),
-    _: None = Depends(require_moodle_key),
+    moodle_site_id: str = Depends(require_moodle_key),
 ) -> MoodleSubmissionRead:
-    submission = _load_existing_submission(db, external_submission_id)
+    submission = _load_existing_submission(db, moodle_site_id, external_submission_id)
     if not submission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodle submission not found")
     return _serialize_moodle_submission(db, submission)
 
 
-def _load_existing_submission(db: Session, external_submission_id: str) -> MoodleSubmission | None:
-    return db.scalar(select(MoodleSubmission).where(MoodleSubmission.external_submission_id == external_submission_id))
+@router.post("/submissions/{external_submission_id}/review", response_model=MoodleSubmissionRead)
+def review_submission(
+    external_submission_id: str,
+    payload: MoodleSubmissionReviewRequest,
+    db: Session = Depends(get_db),
+    moodle_site_id: str = Depends(require_moodle_key),
+) -> MoodleSubmissionRead:
+    submission = _load_existing_submission(db, moodle_site_id, external_submission_id)
+    if not submission:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodle submission not found")
+    answer = db.get(Answer, submission.answer_id)
+    if not answer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Answer not found")
+    if answer.status != AnswerStatusEnum.completed:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only completed answers can be reviewed")
+    question = db.get(Question, submission.question_id)
+    maximum = answer.max_score or (question.max_score if question else None)
+    if maximum is None or payload.score > maximum:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Review score exceeds maximum")
+    answer.review_score = payload.score
+    answer.review_feedback = payload.feedback.strip()
+    answer.reviewed_at = datetime.now(timezone.utc)
+    submission.reviewer_moodle_user_id = payload.reviewer_moodle_user_id
+    submission.reviewer_name = payload.reviewer_name.strip()
+    submission.reviewed_at = answer.reviewed_at
+    db.add_all([answer, submission])
+    attempt = db.get(Attempt, submission.attempt_id)
+    if attempt:
+        _refresh_attempt_totals(db, attempt)
+    db.commit()
+    return _serialize_moodle_submission(db, submission)
+
+
+def _load_existing_submission(db: Session, moodle_site_id: str, external_submission_id: str) -> MoodleSubmission | None:
+    return db.scalar(
+        select(MoodleSubmission).where(
+            MoodleSubmission.moodle_site_id == moodle_site_id,
+            MoodleSubmission.external_submission_id == external_submission_id,
+        )
+    )
 
 
 def _load_published_test_question(db: Session, test_id: str, question_id: str, methodist_email: str | None = None) -> tuple[Test, Question]:
@@ -205,24 +291,56 @@ def _load_published_test_question(db: Session, test_id: str, question_id: str, m
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Moodle can submit only published tests")
     if methodist_email and test.owner.email != methodist_email.lower():
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Test does not belong to the requested methodist")
+    allowed_owners = [email.lower() for email in get_settings().moodle_integration_owner_emails]
+    if allowed_owners and test.owner.email.lower() not in allowed_owners:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Test owner is not allowed for Moodle integration")
     question = db.get(Question, question_id)
     if not question or question.test_id != test.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in this test")
     return test, question
 
 
-def _get_or_create_moodle_user(db: Session, payload: MoodleTextSubmissionRequest) -> User:
+def _get_or_create_moodle_user(db: Session, payload: MoodleTextSubmissionRequest, moodle_site_id: str) -> User:
+    link = db.scalar(
+        select(MoodleUserLink).where(
+            MoodleUserLink.moodle_site_id == moodle_site_id,
+            MoodleUserLink.moodle_user_id == payload.moodle_user_id,
+        )
+    )
+    if link:
+        user = db.get(User, link.user_id)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Linked Moodle user no longer exists")
+        link.email = payload.user_email.lower()
+        link.full_name = payload.user_full_name
+        db.add(link)
+        return user
+
     email = payload.user_email.lower()
     user = db.scalar(select(User).where(User.email == email))
     if user:
-        return user
-    user = User(
-        email=email,
-        full_name=payload.user_full_name,
-        hashed_password=hash_password(secrets.token_urlsafe(24)),
-        role=RoleEnum.examinee,
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Moodle email is already used by another TuneAI identity",
+        )
+    else:
+        user = User(
+            email=email,
+            full_name=payload.user_full_name,
+            hashed_password=hash_password(secrets.token_urlsafe(24)),
+            role=RoleEnum.examinee,
+        )
+        db.add(user)
+        db.flush()
+    db.add(
+        MoodleUserLink(
+            moodle_site_id=moodle_site_id,
+            moodle_user_id=payload.moodle_user_id,
+            user_id=user.id,
+            email=email,
+            full_name=payload.user_full_name,
+        )
     )
-    db.add(user)
     db.flush()
     return user
 
@@ -235,12 +353,19 @@ def _ensure_assignment(db: Session, test: Test, user: User) -> None:
     db.flush()
 
 
-def _get_or_create_attempt(db: Session, test_id: str, user_id: str, external_attempt_id: str | None) -> Attempt:
+def _get_or_create_attempt(
+    db: Session,
+    test_id: str,
+    user_id: str,
+    moodle_site_id: str,
+    external_attempt_id: str | None,
+) -> Attempt:
     if external_attempt_id:
         existing = db.scalar(
             select(MoodleSubmission)
             .where(
                 MoodleSubmission.external_attempt_id == external_attempt_id,
+                MoodleSubmission.moodle_site_id == moodle_site_id,
                 MoodleSubmission.test_id == test_id,
                 MoodleSubmission.user_id == user_id,
             )
@@ -294,11 +419,13 @@ def _create_submission(
     db: Session,
     *,
     payload: MoodleTextSubmissionRequest,
+    moodle_site_id: str,
     user: User,
     attempt: Attempt,
     answer: Answer,
 ) -> MoodleSubmission:
     submission = MoodleSubmission(
+        moodle_site_id=moodle_site_id,
         external_submission_id=payload.external_submission_id,
         external_attempt_id=payload.external_attempt_id,
         moodle_user_id=payload.moodle_user_id,
@@ -325,7 +452,8 @@ def _serialize_moodle_submission(db: Session, submission: MoodleSubmission) -> M
     evaluation = answer.evaluation or {}
     result_ready = answer.status == AnswerStatusEnum.completed
     confidence = evaluation.get("confidence")
-    review_required = bool(evaluation.get("review_recommended")) if result_ready else False
+    reviewed = answer.reviewed_at is not None
+    review_required = bool(evaluation.get("review_recommended")) if result_ready and not reviewed else False
     if answer.status == AnswerStatusEnum.failed:
         review_required = True
     teacher_signal = "processing_failed" if answer.status == AnswerStatusEnum.failed else "review_recommended" if review_required else "none"
@@ -334,6 +462,7 @@ def _serialize_moodle_submission(db: Session, submission: MoodleSubmission) -> M
     score = answer.review_score if answer.review_score is not None else answer.score
     grade = round(score / max_score, 4) if score is not None and max_score else None
     return MoodleSubmissionRead(
+        moodle_site_id=submission.moodle_site_id,
         external_submission_id=submission.external_submission_id,
         external_attempt_id=submission.external_attempt_id,
         moodle_course_id=submission.moodle_course_id,
@@ -350,7 +479,7 @@ def _serialize_moodle_submission(db: Session, submission: MoodleSubmission) -> M
         score=score,
         max_score=max_score,
         grade=grade,
-        feedback=str(evaluation.get("feedback") or answer.review_feedback or "") or None,
+        feedback=str(answer.review_feedback if reviewed else evaluation.get("feedback") or "") or None,
         confidence=float(confidence) if confidence is not None else None,
         review_required=review_required,
         review_reason=_review_reason(answer, evaluation),
@@ -362,6 +491,8 @@ def _serialize_moodle_submission(db: Session, submission: MoodleSubmission) -> M
 def _review_reason(answer: Answer, evaluation: dict) -> str | None:
     if answer.status == AnswerStatusEnum.failed:
         return answer.error_message or "Answer processing failed"
+    if answer.reviewed_at is not None:
+        return None
     if not evaluation.get("review_recommended"):
         return None
     if evaluation.get("ai_safety", {}).get("detected"):
