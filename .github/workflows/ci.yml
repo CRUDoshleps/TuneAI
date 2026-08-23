@@ -70,6 +70,7 @@ jobs:
           REGISTRY_IMAGE: cr.yandex/example00000000000000/tuneai
           IMAGE_TAG: sha-0000000000000000000000000000000000000000
           POSTGRES_HOST: postgres.example.internal
+          YANDEX_FOLDER_ID: example00000000000000
         run: docker compose -f deploy/compose.yaml config >/tmp/tuneai-production-compose.yaml
 
   release:
