@@ -165,12 +165,14 @@ jobs:
 
       - name: Request GitHub OIDC token
         id: oidc
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           result-encoding: string
           script: |
             const token = await core.getIDToken('https://github.com/CRUDoshleps')
             core.setSecret(token)
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+            core.info(`OIDC iss=${claims.iss} aud=${JSON.stringify(claims.aud)} sub=${claims.sub}`)
             return token
 
       - name: Exchange OIDC token for short-lived Yandex IAM token
@@ -178,8 +180,11 @@ jobs:
           OIDC_TOKEN: ${{ steps.oidc.outputs.result }}
           YC_SERVICE_ACCOUNT_ID: ${{ vars.YC_SERVICE_ACCOUNT_ID }}
         run: |
-          response="$(
-            curl --fail --silent --show-error \
+          response_file="$(mktemp)"
+          status_code="$(
+            curl --silent --show-error \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
               --request POST \
               --header 'Content-Type: application/x-www-form-urlencoded' \
               --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
@@ -189,7 +194,11 @@ jobs:
               --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
               https://auth.yandex.cloud/oauth/token
           )"
-          iam_token="$(jq -er '.access_token' <<<"$response")"
+          if [[ "$status_code" != 200 ]]; then
+            jq -c '{error, error_description}' "$response_file" >&2
+            exit 1
+          fi
+          iam_token="$(jq -er '.access_token' "$response_file")"
           echo "::add-mask::${iam_token}"
           echo "YC_IAM_TOKEN=${iam_token}" >> "$GITHUB_ENV"
 
