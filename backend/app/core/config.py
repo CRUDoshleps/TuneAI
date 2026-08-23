@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "local"
+    app_revision: str = "development"
     secret_key: str = Field(default="dev-secret-change-me", min_length=16)
     docs_enabled: bool = True
     metrics_enabled: bool = True

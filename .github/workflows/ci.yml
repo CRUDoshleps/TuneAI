@@ -4,6 +4,14 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuneai-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   backend:
@@ -20,6 +28,13 @@ jobs:
         run: pip install -r backend/requirements-dev.txt
       - name: Run pytest
         run: pytest
+      - name: Validate Alembic migrations
+        env:
+          DATABASE_URL: sqlite:////tmp/tuneai-ci-migrations.db
+          SECRET_KEY: ci-secret-key-for-migrations
+          UPLOAD_DIR: /tmp/tuneai-ci-uploads
+        working-directory: backend
+        run: alembic upgrade head
 
   frontend:
     name: Frontend build and audit
@@ -43,3 +58,162 @@ jobs:
       - name: Audit high severity vulnerabilities
         run: npm audit --audit-level=high
 
+  deployment-config:
+    name: Production deployment config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate shell scripts
+        run: find deploy -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: Validate Docker Compose
+        env:
+          REGISTRY_IMAGE: cr.yandex/example00000000000000/tuneai
+          IMAGE_TAG: sha-0000000000000000000000000000000000000000
+          POSTGRES_HOST: postgres.example.internal
+          YANDEX_FOLDER_ID: example00000000000000
+        run: docker compose -f deploy/compose.yaml config >/tmp/tuneai-production-compose.yaml
+
+  release:
+    name: Publish and deploy production
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: [backend, frontend, deployment-config]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: production
+      url: https://tuneai.vnshk.ru
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: tuneai-production
+      cancel-in-progress: false
+    env:
+      IMAGE_TAG: sha-${{ github.sha }}
+      HEALTH_URL: https://tuneai.vnshk.ru/api/health
+    steps:
+      - name: Check out the immutable source revision
+        uses: actions/checkout@v6
+
+      - name: Validate required Yandex Cloud variables
+        env:
+          YC_REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
+          YC_SERVICE_ACCOUNT_ID: ${{ vars.YC_SERVICE_ACCOUNT_ID }}
+        run: |
+          test "${#YC_REGISTRY_ID}" -eq 20
+          test "${#YC_SERVICE_ACCOUNT_ID}" -eq 20
+          echo "REGISTRY_IMAGE=cr.yandex/${YC_REGISTRY_ID}/tuneai" >> "$GITHUB_ENV"
+
+      - name: Build immutable backend image
+        run: |
+          docker build \
+            --file backend/Dockerfile \
+            --build-arg "APP_REVISION=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${REGISTRY_IMAGE}/backend:${IMAGE_TAG}" \
+            .
+
+      - name: Build immutable frontend image
+        env:
+          NEXT_PUBLIC_TUNEAI_TEMPLATE: ${{ vars.NEXT_PUBLIC_TUNEAI_TEMPLATE || 'unconfigured' }}
+          NEXT_PUBLIC_TUNEAI_PRODUCT_NAME: ${{ vars.NEXT_PUBLIC_TUNEAI_PRODUCT_NAME }}
+          NEXT_PUBLIC_TUNEAI_LOGO_TEXT: ${{ vars.NEXT_PUBLIC_TUNEAI_LOGO_TEXT }}
+          NEXT_PUBLIC_TUNEAI_LOGO_URL: ${{ vars.NEXT_PUBLIC_TUNEAI_LOGO_URL }}
+          NEXT_PUBLIC_TUNEAI_REPOSITORY_URL: ${{ vars.NEXT_PUBLIC_TUNEAI_REPOSITORY_URL || 'https://github.com/CRUDoshleps/TuneAI' }}
+          NEXT_PUBLIC_TUNEAI_DOCS_URL: ${{ vars.NEXT_PUBLIC_TUNEAI_DOCS_URL || 'https://github.com/CRUDoshleps/TuneAI' }}
+          NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL: ${{ vars.NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL }}
+          NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON: ${{ vars.NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON }}
+          NEXT_PUBLIC_TUNEAI_CONFIG_JSON: ${{ vars.NEXT_PUBLIC_TUNEAI_CONFIG_JSON }}
+        run: |
+          docker build \
+            --file frontend/Dockerfile \
+            --build-arg "NEXT_PUBLIC_TUNEAI_TEMPLATE=${NEXT_PUBLIC_TUNEAI_TEMPLATE}" \
+            --build-arg "NEXT_PUBLIC_TUNEAI_PRODUCT_NAME=${NEXT_PUBLIC_TUNEAI_PRODUCT_NAME}" \
+            --build-arg "NEXT_PUBLIC_TUNEAI_LOGO_TEXT=${NEXT_PUBLIC_TUNEAI_LOGO_TEXT}" \
+            --build-arg "NEXT_PUBLIC_TUNEAI_LOGO_URL=${NEXT_PUBLIC_TUNEAI_LOGO_URL}" \
+            --build-arg "NEXT_PUBLIC_TUNEAI_REPOSITORY_URL=${NEXT_PUBLIC_TUNEAI_REPOSITORY_URL}" \
+            --build-arg "NEXT_PUBLIC_TUNEAI_DOCS_URL=${NEXT_PUBLIC_TUNEAI_DOCS_URL}" \
+            --build-arg "NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL=${NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL}" \
+            --build-arg "NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON=${NEXT_PUBLIC_TUNEAI_CONSULTATION_PERSON}" \
+            --build-arg "NEXT_PUBLIC_TUNEAI_CONFIG_JSON=${NEXT_PUBLIC_TUNEAI_CONFIG_JSON}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${REGISTRY_IMAGE}/frontend:${IMAGE_TAG}" \
+            .
+
+      - name: Smoke test production images
+        run: |
+          backend_revision="$(docker run --rm --entrypoint python "${REGISTRY_IMAGE}/backend:${IMAGE_TAG}" -c 'from app.core.config import get_settings; print(get_settings().app_revision)')"
+          test "$backend_revision" = "$GITHUB_SHA"
+
+          docker run --detach --name tuneai-frontend-smoke --publish 127.0.0.1:3000:3000 "${REGISTRY_IMAGE}/frontend:${IMAGE_TAG}"
+          trap 'docker rm --force tuneai-frontend-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent --show-error http://127.0.0.1:3000/ >/dev/null && exit 0
+            sleep 2
+          done
+          docker logs tuneai-frontend-smoke
+          exit 1
+
+      - name: Scan images for embedded secrets
+        run: |
+          for image in "${REGISTRY_IMAGE}/backend:${IMAGE_TAG}" "${REGISTRY_IMAGE}/frontend:${IMAGE_TAG}"; do
+            docker run --rm \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:0.65.0 image \
+              --scanners secret \
+              --exit-code 1 \
+              --no-progress \
+              "$image"
+          done
+
+      - name: Request GitHub OIDC token
+        id: oidc
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const token = await core.getIDToken('https://github.com/CRUDoshleps')
+            core.setSecret(token)
+            return token
+
+      - name: Exchange OIDC token for short-lived Yandex IAM token
+        env:
+          OIDC_TOKEN: ${{ steps.oidc.outputs.result }}
+          YC_SERVICE_ACCOUNT_ID: ${{ vars.YC_SERVICE_ACCOUNT_ID }}
+        run: |
+          response="$(
+            curl --fail --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/x-www-form-urlencoded' \
+              --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+              --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+              --data-urlencode "audience=${YC_SERVICE_ACCOUNT_ID}" \
+              --data-urlencode "subject_token=${OIDC_TOKEN}" \
+              --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+              https://auth.yandex.cloud/oauth/token
+          )"
+          iam_token="$(jq -er '.access_token' <<<"$response")"
+          echo "::add-mask::${iam_token}"
+          echo "YC_IAM_TOKEN=${iam_token}" >> "$GITHUB_ENV"
+
+      - name: Publish complete release to Yandex Container Registry
+        run: |
+          printf '%s' "$YC_IAM_TOKEN" | docker login --username iam --password-stdin cr.yandex
+          docker push "${REGISTRY_IMAGE}/backend:${IMAGE_TAG}"
+          docker push "${REGISTRY_IMAGE}/frontend:${IMAGE_TAG}"
+          docker logout cr.yandex
+
+      - name: Wait for VM rollout and verify exact revision
+        run: |
+          for attempt in {1..90}; do
+            body="$(curl --fail --silent --show-error --max-time 5 "$HEALTH_URL" || true)"
+            if jq -e --arg revision "$GITHUB_SHA" \
+              '.status == "ok" and .version == $revision' <<<"$body" >/dev/null 2>&1
+            then
+              echo "TuneAI ${GITHUB_SHA} is healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Production did not expose ${GITHUB_SHA}; inspect tuneai-deploy.service on prod-app-01." >&2
+          exit 1

@@ -118,6 +118,15 @@ cd frontend
 npm run build
 ```
 
+## Production deployment
+
+Merge в `main` запускает полный CI, публикует immutable backend/frontend images
+в Yandex Container Registry и автоматически обновляет
+[tuneai.vnshk.ru](https://tuneai.vnshk.ru). GitHub аутентифицируется через
+OIDC без постоянного ключа; VM проверяет health и точный git SHA, а при ошибке
+возвращает предыдущие images. Схема и эксплуатационные команды описаны в
+[production deployment guide](docs/production-deployment.md).
+
 ## Лицензия
 
 Исходный код доступен для ознакомления в рамках демонстрации проекта. Все права принадлежат CRUDoshleps. Подробнее см. [LICENSE](LICENSE).
