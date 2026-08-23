@@ -26,7 +26,7 @@ push/merge в trunk-ветку `main`. Ручной повторный запу�
 
 ## GitHub configuration
 
-Environment `production` и repository variables:
+Repository variables:
 
 | Variable | Назначение |
 |---|---|
