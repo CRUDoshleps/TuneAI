@@ -2,6 +2,7 @@ name: tuneai
 
 x-backend-environment: &backend-environment
   APP_ENV: production
+  APP_REVISION: ${IMAGE_TAG:?IMAGE_TAG is required}
   POSTGRES_HOST: ${POSTGRES_HOST:?POSTGRES_HOST is required}
   YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:?YANDEX_FOLDER_ID is required}
   YANDEX_MOCK: "false"

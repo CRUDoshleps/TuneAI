@@ -1,8 +1,11 @@
 FROM python:3.12-slim
 
+ARG APP_REVISION=development
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_COMPILE=1 \
+    APP_REVISION=${APP_REVISION} \
     HOME=/home/tuneai
 
 WORKDIR /app

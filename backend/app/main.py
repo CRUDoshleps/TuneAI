@@ -82,14 +82,14 @@ async def request_context_middleware(request: Request, call_next: Callable) -> R
 
 @app.get("/health", tags=["system"])
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": settings.app_revision.removeprefix("sha-")}
 
 
 @app.get("/readiness", tags=["system"])
 def readiness() -> dict[str, str]:
     with SessionLocal() as db:
         db.execute(text("SELECT 1"))
-    return {"status": "ready"}
+    return {"status": "ready", "version": settings.app_revision.removeprefix("sha-")}
 
 
 @app.get("/readiness/ai", response_model=AIReadiness, tags=["system"])
