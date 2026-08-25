@@ -437,6 +437,10 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
   const [, setStatus] = useState<string>("Готово к работе");
   const [error, setError] = useState<string>("");
   const [publicView, setPublicView] = useState<PublicView>("home");
+  const openPublicView = (view: PublicView) => {
+    setPublicView(view);
+    window.scrollTo({ top: 0, left: 0 });
+  };
   const [demoScenarioId, setDemoScenarioId] = useState<string>(defaultPlatformConfig.demoScenarios[0]?.id || "self-training");
   const [widgetTestId] = useState<string>(() => {
     if (typeof window === "undefined") {
@@ -1957,13 +1961,13 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                   className={publicView === view ? "active" : ""}
                   aria-pressed={publicView === view}
                   key={view}
-                  onClick={() => setPublicView(view as PublicView)}
+                  onClick={() => openPublicView(view as PublicView)}
                 >
                   {label}
                 </button>
               ))}
             </nav>
-            <button className="nav-pill" type="button" onClick={() => setPublicView("demo")}>Войти</button>
+            <button className="nav-pill" type="button" onClick={() => openPublicView("demo")}>Войти</button>
           </header>
 
           {publicView === "home" ? (
@@ -1974,10 +1978,10 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                   <h1>Ответьте своими словами. <span>Поймите, что улучшить.</span></h1>
                   <p>Запишите ответ — {activePlatformConfig.productName} сопоставит его с материалами курса и покажет, какие мысли раскрыты, а какие стоит уточнить.</p>
                   <div className="hero-actions">
-                    <button className="primary" onClick={() => setPublicView("demo")}>
+                    <button className="primary" onClick={() => openPublicView("demo")}>
                       <Mic size={17} /> Попробовать ответ
                     </button>
-                    <button className="landing-text-action" type="button" onClick={() => setPublicView("demo")}>У меня есть аккаунт</button>
+                    <button className="landing-text-action" type="button" onClick={() => openPublicView("demo")}>У меня есть аккаунт</button>
                   </div>
                   <p className="landing-trust"><Shield size={16} /> Спорные оценки остаются на проверке у преподавателя.</p>
                 </div>
@@ -2054,7 +2058,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
 
               <section className="landing-final-cta">
                 <div><p className="landing-overline">Посмотрите изнутри</p><h2>Попробуйте один ответ — дальше интерфейс объяснит сам.</h2></div>
-                <div><button className="primary" type="button" onClick={() => setPublicView("demo")}>Открыть демонстрацию <ChevronRight size={17} /></button><a href={consultationHref}>Обсудить внедрение</a></div>
+                <div><button className="primary" type="button" onClick={() => openPublicView("demo")}>Открыть демонстрацию <ChevronRight size={17} /></button><a href={consultationHref}>Обсудить внедрение</a></div>
               </section>
             </section>
           ) : (

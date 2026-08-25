@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.join(__dirname, "..");
 const pageSource = readFileSync(path.join(frontendRoot, "app", "demo", "page.tsx"), "utf8");
 const componentSource = readFileSync(path.join(frontendRoot, "components", "PublicDemoSite.tsx"), "utf8");
+const appSource = readFileSync(path.join(frontendRoot, "components", "TuneAIApp.tsx"), "utf8");
 const configSource = readFileSync(path.join(frontendRoot, "lib", "platform-config.ts"), "utf8");
 const stylesSource = readFileSync(path.join(frontendRoot, "app", "styles.css"), "utf8");
 const publicDemoStyles = stylesSource.match(/\.public-demo-site[\s\S]*?(?=\.module-list)/)?.[0] || "";
@@ -53,4 +54,10 @@ test("public showcase styles stay on the light project palette", () => {
   assert.doesNotMatch(publicDemoStyles, /background:\s*(#000|#111|black)/i);
   assert.doesNotMatch(publicDemoStyles, /var\(--green\)/);
   assert.doesNotMatch(publicDemoStyles, /#f1fbea/i);
+});
+
+test("public view navigation starts each screen at the top", () => {
+  assert.match(appSource, /const openPublicView = \(view: PublicView\)/);
+  assert.match(appSource, /window\.scrollTo\(\{ top: 0, left: 0 \}\)/);
+  assert.doesNotMatch(appSource, /onClick=\{\(\) => setPublicView\(/);
 });
