@@ -214,6 +214,15 @@ Backup сохраняет PostgreSQL dump и uploads/material files. Для prod
 - [Демо-сценарии](docs/demo.md)
 - [Roadmap](docs/roadmap.md)
 
+## Production deployment
+
+Merge в `main` запускает полный CI, публикует immutable backend/frontend images
+в Yandex Container Registry и автоматически обновляет
+[tuneai.vnshk.ru](https://tuneai.vnshk.ru). GitHub аутентифицируется через
+OIDC без постоянного ключа; VM проверяет health и точный git SHA, а при ошибке
+возвращает предыдущие images. Схема и эксплуатационные команды описаны в
+[production deployment guide](docs/production-deployment.md).
+
 ## Лицензия
 
 Проект распространяется под MIT License. Подробнее см. [LICENSE](LICENSE).

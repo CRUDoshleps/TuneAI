@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Yandex Container Registry for a new TuneAI release
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+RandomizedDelaySec=10s
+Persistent=true
+Unit=tuneai-deploy.service
+
+[Install]
+WantedBy=timers.target
