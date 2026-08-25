@@ -1,0 +1,18 @@
+[Unit]
+Description=Deploy newest complete TuneAI release
+After=docker.service network-online.target platform-edge.service tuneai-secrets.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/apps/tuneai/deploy/watch-registry.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/srv/apps/tuneai/deploy /run/apps/tuneai /run/lock
+NoNewPrivileges=true
+TimeoutStartSec=600
