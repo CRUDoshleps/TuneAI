@@ -1,0 +1,13 @@
+{$TUNEAI_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Content-Security-Policy "frame-ancestors 'self' {$EMBED_ALLOWED_ORIGINS}"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), geolocation=(), microphone=(self)"
+	}
+
+	reverse_proxy frontend:3000
+}

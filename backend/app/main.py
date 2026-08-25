@@ -5,17 +5,19 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, Request, Response, status
+from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from app.api import admin, attempts, auth, materials, tests, users
+from app.api import admin, admin_ai, analytics, attempts, auth, groups, materials, moodle, public, skills, tests, users
 from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.db.session import SessionLocal, init_db
+from app.db.session import SessionLocal, get_db, init_db
 from app.metrics import REQUESTS, metrics_response
 from app.schemas import AIReadiness
+from app.services.ai_provider_runtime import active_provider_readiness
 
 
 configure_logging()
@@ -48,7 +50,7 @@ app.add_middleware(
     allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=settings.effective_cors_allow_credentials,
     allow_methods=["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
     expose_headers=["X-Request-ID"],
 )
 
@@ -93,7 +95,10 @@ def readiness() -> dict[str, str]:
 
 
 @app.get("/readiness/ai", response_model=AIReadiness, tags=["system"])
-def ai_readiness() -> AIReadiness:
+def ai_readiness(db: Session = Depends(get_db)) -> AIReadiness:
+    db_readiness = active_provider_readiness(db, settings)
+    if db_readiness:
+        return db_readiness
     has_credentials = bool(settings.yandex_api_key or settings.yandex_iam_token)
     configured = settings.yandex_mock or bool(has_credentials and settings.yandex_folder_id)
     mode = "mock" if settings.yandex_mock else "real"
@@ -102,11 +107,13 @@ def ai_readiness() -> AIReadiness:
         if settings.yandex_mock
         else "Рабочий режим: аудио и текст обрабатываются сервисами Yandex AI Studio."
     )
+    provider = "Mock AI" if settings.yandex_mock else "Yandex AI Studio"
     return AIReadiness(
         status="ready" if configured else "configuration_required",
         mode=mode,
         configured=configured,
-        capabilities=["SpeechKit STT", "YandexGPT", "Text Embeddings", "RAG"],
+        provider=provider,
+        capabilities=["Mock evaluation", "RAG"] if settings.yandex_mock else ["SpeechKit STT", "YandexGPT", "Text Embeddings", "RAG"],
         review_confidence_threshold=settings.review_confidence_threshold,
         disclosure=disclosure,
     )
@@ -117,11 +124,17 @@ if settings.metrics_enabled:
 
 
 app.include_router(auth.router)
+app.include_router(public.router)
 app.include_router(users.router)
+app.include_router(groups.router)
+app.include_router(skills.router)
 app.include_router(tests.router)
 app.include_router(attempts.router)
 app.include_router(materials.router)
+app.include_router(moodle.router)
 app.include_router(admin.router)
+app.include_router(admin_ai.router)
+app.include_router(analytics.router)
 
 
 def _is_rate_limited(request: Request) -> bool:

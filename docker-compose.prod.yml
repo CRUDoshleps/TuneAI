@@ -1,0 +1,64 @@
+services:
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_DB: tuneai
+      POSTGRES_USER: tuneai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+
+  rabbitmq:
+    ports: !reset []
+    environment:
+      RABBITMQ_DEFAULT_USER: tuneai
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+
+  minio:
+    ports: !reset []
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tuneai}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+
+  backend:
+    ports: !reset []
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://tuneai:${POSTGRES_PASSWORD}@postgres:5432/tuneai
+      RABBITMQ_URL: amqp://tuneai:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      DEMO_BOOTSTRAP_ENABLED: "false"
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
+      EMBED_ALLOWED_ORIGINS: ${EMBED_ALLOWED_ORIGINS:-}
+      DOCS_ENABLED: "false"
+
+  worker:
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://tuneai:${POSTGRES_PASSWORD}@postgres:5432/tuneai
+      RABBITMQ_URL: amqp://tuneai:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      DEMO_BOOTSTRAP_ENABLED: "false"
+      DOCS_ENABLED: "false"
+
+  frontend:
+    ports: !reset []
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    environment:
+      TUNEAI_DOMAIN: ${TUNEAI_DOMAIN:?TUNEAI_DOMAIN is required}
+      EMBED_ALLOWED_ORIGINS: ${EMBED_ALLOWED_ORIGINS:-'self'}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile.self-host:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+
+volumes:
+  caddy-data:
+  caddy-config:

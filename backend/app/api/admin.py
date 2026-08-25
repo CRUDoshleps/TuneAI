@@ -1,13 +1,18 @@
 from datetime import datetime, timezone
+from pathlib import Path
+import socket
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.deps import require_roles
 from app.models import Answer, AnswerStatusEnum, Attempt, OutboxEvent, OutboxStatusEnum, RoleEnum, Test, User
-from app.schemas import AdminAttemptRead, AdminDashboard, AdminFailedJobRead
+from app.schemas import AdminAttemptRead, AdminDashboard, AdminFailedJobRead, SystemHealthCheck, SystemHealthRead
+from app.services.ai_provider_runtime import active_provider_readiness
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -26,6 +31,44 @@ def dashboard(
         answers_failed=db.scalar(select(func.count(Answer.id)).where(Answer.status == AnswerStatusEnum.failed)) or 0,
         outbox_pending=db.scalar(select(func.count(OutboxEvent.id)).where(OutboxEvent.status == OutboxStatusEnum.pending)) or 0,
     )
+
+
+@router.get("/system", response_model=SystemHealthRead)
+def system_health(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(RoleEnum.admin)),
+) -> SystemHealthRead:
+    settings = get_settings()
+    checks: list[SystemHealthCheck] = []
+    checks.append(_check("backend", "ok", "API отвечает и авторизация работает"))
+    try:
+        db.execute(select(1))
+        checks.append(_check("database", "ok", "PostgreSQL доступен"))
+    except Exception as exc:
+        checks.append(_check("database", "error", str(exc)))
+    pending = db.scalar(select(func.count(OutboxEvent.id)).where(OutboxEvent.status == OutboxStatusEnum.pending)) or 0
+    failed = db.scalar(select(func.count(OutboxEvent.id)).where(OutboxEvent.status == OutboxStatusEnum.failed)) or 0
+    if failed:
+        checks.append(_check("worker", "error", f"Failed outbox events: {failed}"))
+    elif pending:
+        checks.append(_check("worker", "warning", f"Pending outbox events: {pending}"))
+    else:
+        checks.append(_check("worker", "ok", "Outbox queue is empty"))
+    checks.append(_rabbitmq_check(settings.rabbitmq_url))
+    checks.append(_storage_check(settings.upload_dir))
+    ai = active_provider_readiness(db, settings)
+    if ai:
+        checks.append(_check("ai", "ok" if ai.configured else "warning", f"{ai.provider}: {ai.status}"))
+    else:
+        configured = settings.yandex_mock or bool((settings.yandex_api_key or settings.yandex_iam_token) and settings.yandex_folder_id)
+        checks.append(_check("ai", "ok" if configured else "warning", "Mock AI" if settings.yandex_mock else "AI credentials are incomplete"))
+    moodle_ready = settings.moodle_integration_enabled and bool(settings.moodle_integration_token)
+    checks.append(_check("moodle", "ok" if moodle_ready else "warning", "Moodle service API enabled" if moodle_ready else "Moodle service API is disabled"))
+    last_answer_error = db.scalar(select(Answer.error_message).where(Answer.status == AnswerStatusEnum.failed).order_by(Answer.updated_at.desc()).limit(1))
+    last_outbox_error = db.scalar(select(OutboxEvent.last_error).where(OutboxEvent.status == OutboxStatusEnum.failed).order_by(OutboxEvent.created_at.desc()).limit(1))
+    last_error = last_answer_error or last_outbox_error
+    checks.append(_check("last_error", "warning" if last_error else "ok", last_error or "Ошибок обработки не найдено"))
+    return SystemHealthRead(checks=checks, generated_at=datetime.now(timezone.utc))
 
 
 @router.get("/attempts", response_model=list[AdminAttemptRead])
@@ -117,3 +160,30 @@ def list_failed_jobs(
         )
     rows.sort(key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     return rows[:100]
+
+
+def _check(name: str, status: str, detail: str) -> SystemHealthCheck:
+    return SystemHealthCheck(name=name, status=status, detail=detail)
+
+
+def _rabbitmq_check(url: str) -> SystemHealthCheck:
+    parsed = urlparse(url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 5672
+    try:
+        with socket.create_connection((host, port), timeout=1.5):
+            return _check("rabbitmq", "ok", f"{host}:{port} доступен")
+    except OSError as exc:
+        return _check("rabbitmq", "warning", f"{host}:{port} недоступен: {exc}")
+
+
+def _storage_check(upload_dir: str) -> SystemHealthCheck:
+    try:
+        path = Path(upload_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".tuneai-health"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return _check("storage", "ok", f"{path} доступен для записи")
+    except OSError as exc:
+        return _check("storage", "error", str(exc))

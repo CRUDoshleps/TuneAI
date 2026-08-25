@@ -8,10 +8,11 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal, init_db
 from app.metrics import ANSWERS_COMPLETED, ANSWERS_FAILED
-from app.models import AnswerStatusEnum
-from app.services.outbox import ANSWER_UPLOADED, get_pending_events, mark_failed, mark_published
+from app.models import AnswerStatusEnum, MaterialIndexStatusEnum
+from app.services.outbox import ANSWER_UPLOADED, MATERIAL_UPLOADED, get_pending_events, mark_failed, mark_published
 from app.services.processing import process_answer_uploaded
 from app.services.queue import QueuePublisher, declare_answer_queue
+from app.services.rag import index_material
 
 
 configure_logging()
@@ -60,10 +61,19 @@ async def _consume_answers_once() -> None:
                 async with message.process(requeue=False):
                     payload = json.loads(message.body.decode("utf-8"))
                     event_type = payload.get("event_type") or ANSWER_UPLOADED
-                    if event_type != ANSWER_UPLOADED and "answer_id" not in payload:
+                    if event_type not in {ANSWER_UPLOADED, MATERIAL_UPLOADED}:
                         logger.warning("unknown_event", payload=payload)
                         continue
-                    await handle_answer_message(payload)
+                    if event_type == ANSWER_UPLOADED:
+                        if "answer_id" not in payload:
+                            logger.warning("unknown_event", payload=payload)
+                            continue
+                        await handle_answer_message(payload)
+                    else:
+                        if "material_id" not in payload:
+                            logger.warning("unknown_event", payload=payload)
+                            continue
+                        await handle_material_message(payload)
 
 
 async def consume_answers() -> None:
@@ -85,6 +95,14 @@ async def handle_answer_message(payload: dict) -> None:
             ANSWERS_COMPLETED.inc()
         elif answer.status == AnswerStatusEnum.failed:
             ANSWERS_FAILED.inc()
+
+
+async def handle_material_message(payload: dict) -> None:
+    material_id = payload["material_id"]
+    with SessionLocal() as db:
+        material = await index_material(db, material_id=material_id)
+        if material.index_status == MaterialIndexStatusEnum.failed:
+            logger.warning("material_index_failed", material_id=material.id, error=material.index_error)
 
 
 async def main() -> None:
