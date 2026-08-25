@@ -74,6 +74,15 @@ jobs:
       - name: Rehearse production migration path
         run: |
           alembic upgrade 0003_add_answer_review
+          python - <<'PY'
+          import os
+
+          import sqlalchemy as sa
+
+          engine = sa.create_engine(os.environ["DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(sa.text("DROP TABLE IF EXISTS ai_provider_configs CASCADE"))
+          PY
           alembic upgrade head
           test "$(alembic current | awk '{print $1}')" = "0016_moodle_production_hardening"
 

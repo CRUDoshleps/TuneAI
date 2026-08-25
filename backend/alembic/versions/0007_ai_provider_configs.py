@@ -20,7 +20,13 @@ def upgrade() -> None:
         return
     json_type = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
     provider_type = (
-        sa.Enum("mock", "yandex", "openai_compatible", name="aiproviderenum")
+        postgresql.ENUM(
+            "mock",
+            "yandex",
+            "openai_compatible",
+            name="aiproviderenum",
+            create_type=False,
+        )
         if bind.dialect.name == "postgresql"
         else sa.String(length=32)
     )
