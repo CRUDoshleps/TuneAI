@@ -29,6 +29,7 @@ define([], function() {
         var recorder = null;
         var recorded = null;
         var submissionId = null;
+        var attemptId = null;
 
         function setStatus(text) {
             status.textContent = text;
@@ -43,6 +44,7 @@ define([], function() {
                 chunks = [];
                 recorded = null;
                 submissionId = uuid();
+                attemptId = uuid();
                 var type = supportedType();
                 recorder = new MediaRecorder(stream, type ? {mimeType: type} : undefined);
                 recorder.ondataavailable = function(event) {
@@ -90,8 +92,10 @@ define([], function() {
                 form.append('groupid', root.dataset.groupid);
             }
             form.append('external_submission_id', submissionId);
+            form.append('external_attempt_id', attemptId);
             form.append('audio', recorded, 'answer.webm');
             submit.disabled = true;
+            root.setAttribute('aria-busy', 'true');
             setStatus('Submitting...');
             fetch(root.dataset.endpoint, {
                 method: 'POST',
@@ -103,9 +107,14 @@ define([], function() {
                         throw new Error(payload.error || 'TuneAI upload failed.');
                     }
                     setStatus('Submitted to TuneAI.');
+                    root.setAttribute('aria-busy', 'false');
+                    if (root.dataset.resulturl) {
+                        window.location.assign(root.dataset.resulturl + '&external_submission_id=' + encodeURIComponent(submissionId));
+                    }
                 });
             }).catch(function(error) {
                 submit.disabled = false;
+                root.setAttribute('aria-busy', 'false');
                 setStatus(error.message);
             });
         });

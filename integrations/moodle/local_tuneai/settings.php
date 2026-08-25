@@ -1,4 +1,6 @@
 <?php
+// This file is part of Moodle - http://moodle.org/. Licensed under GNU GPL v3 or later.
+
 defined('MOODLE_INTERNAL') || die();
 
 if ($hassiteconfig) {
@@ -25,6 +27,14 @@ if ($hassiteconfig) {
         get_string('integrationkey', 'local_tuneai'),
         get_string('integrationkey_desc', 'local_tuneai'),
         ''
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'local_tuneai/siteid',
+        get_string('siteid', 'local_tuneai'),
+        get_string('siteid_desc', 'local_tuneai'),
+        '',
+        PARAM_ALPHANUMEXT
     ));
 
     $settings->add(new admin_setting_configtext(

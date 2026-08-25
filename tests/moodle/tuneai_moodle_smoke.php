@@ -18,6 +18,7 @@ if ($baseUrl === '' || $token === '') {
 set_config('enabled', 1, 'local_tuneai');
 set_config('baseurl', $baseUrl, 'local_tuneai');
 set_config('integrationkey', $token, 'local_tuneai');
+set_config('siteid', 'tuneai-moodle-e2e', 'local_tuneai');
 set_config('timeout', 30, 'local_tuneai');
 set_config('gradesync', 1, 'local_tuneai');
 set_config('curlsecurityblockedhosts', '');
@@ -117,6 +118,21 @@ $replay = $service->submit_text_answer(
 assertSame($submission['answer_id'] ?? null, $replay['answer_id'] ?? null, 'idempotent answer id');
 assertSame($submission['attempt_id'] ?? null, $replay['attempt_id'] ?? null, 'idempotent attempt id');
 
+$retake = $service->submit_text_answer(
+    (int) $course->id,
+    $cmid,
+    $moodlequestionid,
+    (int) $user->id,
+    'A second quiz attempt stores the event and business update atomically before publishing.',
+    null,
+    $externalSubmissionId . '-retake',
+    null,
+    'moodle-plugin-e2e-attempt-' . $stamp . '-retake'
+);
+if (($retake['attempt_id'] ?? null) === ($submission['attempt_id'] ?? null)) {
+    fail('A Moodle retake must create a separate TuneAI attempt');
+}
+
 $result = pollScheduledTaskResult($repository, $externalSubmissionId);
 
 assertSame(true, (bool) ($result['result_ready'] ?? false), 'final result_ready');
@@ -127,10 +143,23 @@ requireNumber($result, 'confidence');
 requireString($result, 'feedback');
 requireString($result, 'transcript');
 
-if (!isset($result['moodle_grade_sync']) || !is_array($result['moodle_grade_sync'])) {
-    fail('Moodle grade sync payload is missing');
-}
+assertSame('review_recommended', $result['teacher_signal'] ?? null, 'initial teacher signal');
+assertMoodleGradeMissing((int) $course->id, $cmid, (int) $user->id);
 
+$reviewer = $DB->get_record('user', ['username' => 'admin'], '*', MUST_EXIST);
+$result = $service->review_submission(
+    $externalSubmissionId,
+    8.5,
+    'Approved by the Moodle E2E teacher.',
+    (int) $reviewer->id,
+    fullname($reviewer)
+);
+assertSame('none', $result['teacher_signal'] ?? null, 'reviewed teacher signal');
+assertSame(8.5, (float) ($result['score'] ?? -1), 'reviewed score');
+assertSame('Approved by the Moodle E2E teacher.', $result['feedback'] ?? null, 'reviewed feedback');
+if (!isset($result['moodle_grade_sync']) || !is_array($result['moodle_grade_sync'])) {
+    fail('Moodle grade sync payload is missing after teacher review');
+}
 assertMoodleGrade((int) $course->id, $cmid, (int) $user->id, $result);
 
 $localSubmission = $repository->find_submission($externalSubmissionId);
@@ -227,6 +256,21 @@ function assertMoodleGrade(int $courseid, int $cmid, int $userid, array $result)
     }
 }
 
+function assertMoodleGradeMissing(int $courseid, int $cmid, int $userid): void
+{
+    global $DB;
+    $items = $DB->get_records('grade_items', [
+        'courseid' => $courseid,
+        'itemtype' => 'manual',
+        'iteminstance' => $cmid,
+    ]);
+    foreach ($items as $item) {
+        if ($DB->record_exists('grade_grades', ['itemid' => $item->id, 'userid' => $userid])) {
+            fail('A review-required AI result must not be written to the Moodle gradebook');
+        }
+    }
+}
+
 function waitForTuneAI(string $baseUrl): void
 {
     $deadline = time() + 120;
@@ -248,7 +292,7 @@ function pollScheduledTaskResult(\local_tuneai\mapping_repository $repository, s
     do {
         $submission = $repository->find_submission($externalSubmissionId);
         if ($submission) {
-            $submission->next_sync_time = 0;
+            $submission->next_sync_time = time() - 1;
             $DB->update_record(\local_tuneai\mapping_repository::SUBMISSION_TABLE, $submission);
         }
         $task->execute();
@@ -261,26 +305,16 @@ function pollScheduledTaskResult(\local_tuneai\mapping_repository $repository, s
                 'score' => (float) $submission->score,
                 'max_score' => (float) $submission->max_score,
                 'grade' => (float) $submission->grade,
-                'confidence' => 0.68,
+                'confidence' => (float) $submission->confidence,
                 'feedback' => (string) $submission->feedback,
-                'transcript' => 'text',
+                'transcript' => (string) $submission->transcript,
                 'teacher_signal' => $submission->teacher_signal,
-                'moodle_grade_sync' => assertMoodleGradeSyncPayload($submission),
+                'review_reason' => $submission->review_reason,
             ];
         }
         sleep(3);
     } while (time() < $deadline);
     fail('Timed out waiting for Moodle scheduled sync');
-}
-
-function assertMoodleGradeSyncPayload(\stdClass $submission): array
-{
-    return [
-        'status' => GRADE_UPDATE_OK,
-        'itemnumber' => ((int) sprintf('%u', crc32((string) $submission->tuneai_question_id))) % 1000000000,
-        'finalgrade' => (float) $submission->score,
-        'max_score' => (float) $submission->max_score,
-    ];
 }
 
 function requestJson(string $method, string $url, array $headers, ?array $payload, int $expectedStatus): array

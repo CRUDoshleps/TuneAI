@@ -1,4 +1,6 @@
 <?php
+// This file is part of Moodle - http://moodle.org/. Licensed under GNU GPL v3 or later.
+
 namespace local_tuneai;
 
 defined('MOODLE_INTERNAL') || die();
@@ -11,6 +13,14 @@ class gradebook_service {
         }
         if (empty($result['result_ready']) || !is_numeric($result['score'] ?? null) || !is_numeric($result['max_score'] ?? null)) {
             return null;
+        }
+        if (($result['teacher_signal'] ?? 'none') !== 'none') {
+            return [
+                'status' => 'review_required',
+                'itemnumber' => null,
+                'finalgrade' => null,
+                'max_score' => (float) $result['max_score'],
+            ];
         }
         require_once($CFG->libdir . '/gradelib.php');
         require_once($CFG->libdir . '/grade/grade_item.php');
@@ -68,9 +78,6 @@ class gradebook_service {
     }
 
     private function item_number(\stdClass $submission): int {
-        if (!empty($submission->questionattemptid)) {
-            return (int) $submission->questionattemptid;
-        }
         return ((int) sprintf('%u', crc32((string) $submission->tuneai_question_id))) % 1000000000;
     }
 }
