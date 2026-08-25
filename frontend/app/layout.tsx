@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
+import { Golos_Text } from "next/font/google";
 import { platformConfig } from "../lib/platform-config";
 import "./styles.css";
+
+const golosText = Golos_Text({
+  subsets: ["cyrillic", "latin"],
+  variable: "--font-golos",
+  display: "swap"
+});
 
 export const metadata: Metadata = {
   title: platformConfig.productName,
@@ -10,7 +17,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ru">
-      <body>{children}</body>
+      <body className={golosText.variable}>{children}</body>
     </html>
   );
 }
