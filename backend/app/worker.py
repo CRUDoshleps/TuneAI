@@ -8,11 +8,12 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal, init_db
 from app.metrics import ANSWERS_COMPLETED, ANSWERS_FAILED
-from app.models import AnswerStatusEnum, MaterialIndexStatusEnum
-from app.services.outbox import ANSWER_UPLOADED, MATERIAL_UPLOADED, get_pending_events, mark_failed, mark_published
+from app.models import AnswerStatusEnum, MaterialIndexStatusEnum, SourceImport
+from app.services.outbox import ANSWER_UPLOADED, MATERIAL_UPLOADED, SOURCE_GENERATION_REQUESTED, get_pending_events, mark_failed, mark_published
 from app.services.processing import process_answer_uploaded
 from app.services.queue import QueuePublisher, declare_answer_queue
 from app.services.rag import index_material
+from app.services.source_imports import generate_source_candidates
 
 
 configure_logging()
@@ -61,7 +62,7 @@ async def _consume_answers_once() -> None:
                 async with message.process(requeue=False):
                     payload = json.loads(message.body.decode("utf-8"))
                     event_type = payload.get("event_type") or ANSWER_UPLOADED
-                    if event_type not in {ANSWER_UPLOADED, MATERIAL_UPLOADED}:
+                    if event_type not in {ANSWER_UPLOADED, MATERIAL_UPLOADED, SOURCE_GENERATION_REQUESTED}:
                         logger.warning("unknown_event", payload=payload)
                         continue
                     if event_type == ANSWER_UPLOADED:
@@ -69,11 +70,16 @@ async def _consume_answers_once() -> None:
                             logger.warning("unknown_event", payload=payload)
                             continue
                         await handle_answer_message(payload)
-                    else:
+                    elif event_type == MATERIAL_UPLOADED:
                         if "material_id" not in payload:
                             logger.warning("unknown_event", payload=payload)
                             continue
                         await handle_material_message(payload)
+                    else:
+                        if "source_import_id" not in payload:
+                            logger.warning("unknown_event", payload=payload)
+                            continue
+                        await handle_source_generation(payload)
 
 
 async def consume_answers() -> None:
@@ -103,6 +109,13 @@ async def handle_material_message(payload: dict) -> None:
         material = await index_material(db, material_id=material_id)
         if material.index_status == MaterialIndexStatusEnum.failed:
             logger.warning("material_index_failed", material_id=material.id, error=material.index_error)
+
+
+async def handle_source_generation(payload: dict) -> None:
+    with SessionLocal() as db:
+        source = db.get(SourceImport, payload["source_import_id"])
+        if source is not None:
+            generate_source_candidates(db, source)
 
 
 async def main() -> None:

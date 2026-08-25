@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.deps import get_current_user
 from app.models import RoleEnum, User, UserInvite, utcnow
 from app.schemas import AcceptInviteRequest, ChangePasswordRequest, LoginRequest, RefreshRequest, RegisterRequest, TokenPair, UserRead
+from app.services.audit import record_audit
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -59,6 +60,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenPair:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     if user.role == RoleEnum.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Use admin login")
+    record_audit(db, actor=user, action="auth.login", entity_type="user", entity_id=user.id)
+    db.commit()
     return TokenPair(access_token=create_token(user.id, "access"), refresh_token=create_token(user.id, "refresh"))
 
 
@@ -69,6 +72,8 @@ def admin_login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenPa
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     if user.role != RoleEnum.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin account required")
+    record_audit(db, actor=user, action="auth.admin_login", entity_type="user", entity_id=user.id)
+    db.commit()
     return TokenPair(access_token=create_token(user.id, "access"), refresh_token=create_token(user.id, "refresh"))
 
 

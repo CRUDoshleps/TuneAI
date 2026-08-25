@@ -126,6 +126,11 @@ def _refresh_attempt_totals(db: Session, attempt: Attempt) -> None:
     answers = list(db.scalars(select(Answer).where(Answer.attempt_id == attempt.id)).all())
     if not answers:
         return
+    question_count = len(list(db.scalars(select(Question.id).where(Question.test_id == attempt.test_id)).all()))
+    if len(answers) < question_count:
+        attempt.status = AttemptStatusEnum.processing
+        db.add(attempt)
+        return
     if any(answer.status != AnswerStatusEnum.completed for answer in answers):
         return
     attempt.total_score = sum(

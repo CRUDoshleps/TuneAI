@@ -8,6 +8,7 @@ from app.deps import get_current_user
 from app.models import Group, GroupMembership, RoleEnum, User
 from app.schemas import GroupCreate, GroupMemberAdd, GroupMemberRead, GroupRead
 from app.services.moderation import censor_text
+from app.services.audit import record_audit
 
 
 router = APIRouter(prefix="/groups", tags=["groups"])
@@ -40,6 +41,8 @@ def create_group(
         created_by_id=current_user.id,
     )
     db.add(group)
+    db.flush()
+    record_audit(db, actor=current_user, action="group.create", entity_type="group", entity_id=group.id, details={"name": group.name})
     db.commit()
     db.refresh(group)
     return _serialize_group(_load_group(db, group.id, current_user))
@@ -58,6 +61,7 @@ def add_group_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     _ensure_can_group_user(current_user, target)
     db.add(GroupMembership(group_id=group.id, user_id=target.id, added_by_id=current_user.id))
+    record_audit(db, actor=current_user, action="group.member_add", entity_type="group", entity_id=group.id, details={"user_id": target.id})
     try:
         db.commit()
     except IntegrityError:
@@ -78,8 +82,21 @@ def remove_group_member(
     if not membership:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group member not found")
     db.delete(membership)
+    record_audit(db, actor=current_user, action="group.member_remove", entity_type="group", entity_id=group.id, details={"user_id": user_id})
     db.commit()
     return _serialize_group(_load_group(db, group.id, current_user))
+
+
+@router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_group(
+    group_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    group = _load_group(db, group_id, current_user)
+    record_audit(db, actor=current_user, action="group.delete", entity_type="group", entity_id=group.id, details={"name": group.name})
+    db.delete(group)
+    db.commit()
 
 
 def _load_group(db: Session, group_id: str, current_user: User) -> Group:

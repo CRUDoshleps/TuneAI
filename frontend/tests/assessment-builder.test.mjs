@@ -78,3 +78,22 @@ test("admin panel exposes system health invites and password reset", () => {
   assert.match(appSource, /user\.must_change_password/);
   assert.match(appSource, /\/auth\/change-password/);
 });
+
+test("mixed questions and presentation import are wired end to end", () => {
+  assert.match(apiSource, /export type QuestionType = "open_response" \| "single_choice" \| "multiple_choice"/);
+  assert.match(apiSource, /export type SourceImport/);
+  assert.match(appSource, /async function uploadPresentation/);
+  assert.match(appSource, /\/source-imports\/upload/);
+  assert.match(appSource, /function SourceImportPanel/);
+  assert.match(appSource, /function QuestionEditor/);
+  assert.match(appSource, /function ChoiceSubmitter/);
+  assert.match(appSource, /\/choices/);
+});
+
+test("admin operations expose audit retry export and group removal", () => {
+  assert.match(apiSource, /export type AuditLog/);
+  assert.match(appSource, /\/admin\/audit-log/);
+  assert.match(appSource, /async function retryFailedJob/);
+  assert.match(appSource, /\/admin\/results\/export\.csv/);
+  assert.match(appSource, /async function removeGroupMember/);
+});

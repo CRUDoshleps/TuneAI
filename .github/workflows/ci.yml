@@ -84,7 +84,7 @@ jobs:
               connection.execute(sa.text("DROP TABLE IF EXISTS ai_provider_configs CASCADE"))
           PY
           alembic upgrade head
-          test "$(alembic current | awk '{print $1}')" = "0016_moodle_production_hardening"
+          test "$(alembic current | awk '{print $1}')" = "0017_mixed_questions_import"
 
   frontend:
     name: Frontend tests, build and audit
