@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Прототип личного кабинета TuneAI" />
+    <title>TuneAI — прототип личного кабинета</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&amp;display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #fffdf4;
+        --surface: #ffffff;
+        --canvas: #f7f2e3;
+        --ink: #111111;
+        --muted: #625f56;
+        --line: #e3d9c1;
+        --line-strong: #c9bea3;
+        --yellow: #ffcc13;
+        --yellow-soft: #fff0a3;
+        --focus: rgba(255, 204, 19, 0.38);
+        --font-ui: "Golos Text", "Segoe UI", Arial, sans-serif;
+        --font-display: var(--font-ui);
+        --sidebar: 210px;
+      }
+
+      * { box-sizing: border-box; }
+      html { min-width: 320px; scroll-padding-block: 24px 92px; }
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        font-size: 15px;
+        -webkit-font-smoothing: antialiased;
+      }
+      button, input, textarea, select { font: inherit; }
+      button { cursor: pointer; }
+      button:disabled { cursor: not-allowed; opacity: .45; }
+      button, a[href] { touch-action: manipulation; -webkit-tap-highlight-color: rgba(255, 204, 19, 0.28); }
+      button:active, a[href]:active { opacity: 0.72; }
+      a { color: inherit; }
+      :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+      .screen h1[tabindex="-1"]:focus { outline: none; }
+
+      .skip-link { position: fixed; top: 8px; left: 8px; z-index: 100; min-height: 44px; padding: 11px 14px; background: var(--ink); color: white; transform: translateY(-160%); }
+      .skip-link:focus { transform: translateY(0); }
+      .app { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+
+      .sidebar { position: sticky; top: 0; height: 100vh; border-right: 1px solid var(--line); padding: 24px 16px 18px; display: flex; flex-direction: column; background: var(--canvas); }
+      .brand { min-height: 44px; padding: 0 9px; display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; text-decoration: none; }
+      .brand-mark { width: 17px; height: 17px; border: 2px solid var(--ink); background: var(--yellow); transform: rotate(-5deg); }
+      .workspace-label { margin: 28px 11px 10px; color: var(--muted); font-size: 12px; }
+      .primary-nav { display: grid; gap: 3px; }
+      .nav-button { position: relative; width: 100%; min-height: 46px; border: 0; padding: 0 11px; display: flex; align-items: center; gap: 11px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 500; text-align: left; }
+      .nav-button svg { flex: 0 0 auto; }
+      .nav-button:hover { background: rgba(255, 253, 244, 0.72); color: var(--ink); }
+      .nav-button[aria-current="page"] { box-shadow: inset 3px 0 0 var(--ink); color: var(--ink); font-weight: 600; }
+      .user-card { margin-top: auto; border-top: 1px solid var(--line-strong); padding: 17px 9px 4px; display: grid; grid-template-columns: 36px 1fr; gap: 10px; align-items: center; }
+      .avatar { width: 36px; height: 36px; border: 1px solid var(--ink); border-radius: 50%; display: grid; place-items: center; background: var(--paper); font-weight: 700; }
+      .user-card strong { display: block; font-size: 13px; }
+      .user-card small { color: var(--muted); font-size: 11px; }
+
+      .mobile-header, .bottom-nav { display: none; }
+      .main { min-width: 0; min-height: 100vh; padding: 34px clamp(28px, 5vw, 72px) 72px; background: var(--paper); }
+      .screen { width: min(100%, 1120px); margin: 0 auto; }
+      .screen[hidden] { display: none; }
+      .screen-header { margin-bottom: 26px; display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; }
+      .screen-header h1 { margin: 0; font-family: var(--font-display); font-size: clamp(28px, 3vw, 36px); font-weight: 500; line-height: 1.16; letter-spacing: -0.018em; }
+      .screen-header p { max-width: 560px; margin: 8px 0 0; color: var(--muted); line-height: 1.5; }
+
+      .button { min-height: 46px; border: 1px solid var(--ink); border-radius: 8px; padding: 0 17px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; background: var(--ink); color: white; font-weight: 600; text-decoration: none; transition: background 150ms ease, color 150ms ease, border-color 150ms ease; }
+      .button:hover { background: #2c2c2c; }
+      .button-secondary { border-color: var(--line-strong); background: transparent; color: var(--ink); }
+      .button-secondary:hover { border-color: var(--ink); background: transparent; }
+      .text-action { min-height: 44px; border: 0; padding: 0; display: inline-flex; align-items: center; gap: 8px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 600; text-align: left; }
+      .text-action span[aria-hidden="true"] { transition: transform 150ms ease; }
+      .text-action:hover span[aria-hidden="true"] { transform: translateX(3px); }
+
+      .overview-screen { width: min(100%, 900px); }
+      .today-header { margin-bottom: 14px; }
+      .today-header time { color: var(--muted); font-size: 13px; }
+
+      .practice-board { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+      .practice-question { padding: clamp(24px, 3.4vw, 34px); }
+      .question-context { margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: var(--muted); font-size: 13px; }
+      .question-context strong { color: var(--ink); font-weight: 500; }
+      .question-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .practice-question h1 { max-width: 760px; margin: 0; font-family: var(--font-display); font-size: clamp(27px, 3vw, 36px); font-weight: 500; line-height: 1.24; letter-spacing: -0.015em; text-wrap: balance; }
+
+      .audio-draft { min-height: 84px; padding: 14px 16px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; background: var(--ink); color: white; }
+      .device-icon { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--yellow); color: var(--ink); }
+      .draft-identity strong { display: block; font-size: 14px; font-weight: 600; }
+      .draft-identity span { display: block; margin-top: 4px; color: #bdbdbd; font-size: 12px; font-variant-numeric: tabular-nums; }
+      .waveform { min-width: 110px; height: 42px; display: flex; align-items: center; gap: 4px; }
+      .waveform span { width: 3px; height: var(--h); border-radius: 2px; background: #f4f1e8; opacity: .72; }
+      .recorder-cta { min-height: 48px; border: 0; border-radius: 8px; padding: 0 17px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; background: var(--yellow); color: var(--ink); font-weight: 600; white-space: nowrap; }
+      .recorder-cta:hover { background: #ffda4d; }
+
+      .home-grid { margin-top: 34px; }
+      .section-heading { margin-bottom: 13px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+      .section-heading h2 { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -0.014em; }
+      .section-heading .text-action { color: var(--muted); }
+      .agenda-list { display: grid; }
+      .agenda-row { width: 100%; min-height: 88px; border: 0; border-top: 1px solid var(--line); padding: 13px 2px; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 15px; align-items: center; background: transparent; color: var(--ink); text-align: left; }
+      .agenda-row:last-child { border-bottom: 1px solid var(--line); }
+      .agenda-row:hover { background: rgba(247, 242, 227, .62); }
+      .agenda-date { color: var(--muted); text-align: center; }
+      .agenda-date strong { display: block; color: var(--ink); font-family: var(--font-display); font-size: 22px; font-weight: 500; line-height: 1; }
+      .agenda-date span { display: block; margin-top: 5px; font-size: 11px; }
+      .agenda-copy strong { display: block; font-size: 15px; font-weight: 600; line-height: 1.35; }
+      .agenda-copy small { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+      .agenda-arrow { color: var(--muted); font-size: 18px; }
+
+      .tests-layout { display: grid; grid-template-columns: minmax(280px, .72fr) minmax(420px, 1.28fr); gap: clamp(24px, 4vw, 46px); }
+      .tests-index { min-width: 0; }
+      .test-filter { width: 100%; min-height: 48px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 0 13px; background: var(--surface); color: var(--ink); }
+      .test-choice { width: 100%; min-height: 82px; border: 0; border-bottom: 1px solid var(--line); padding: 14px 11px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; background: transparent; color: var(--ink); text-align: left; }
+      .test-choice:first-of-type { margin-top: 8px; border-top: 1px solid var(--line); }
+      .test-choice[aria-pressed="true"] { box-shadow: inset 3px 0 0 var(--ink); background: var(--canvas); }
+      .test-choice strong { display: block; margin-bottom: 5px; font-size: 14px; line-height: 1.35; }
+      .test-choice small { color: var(--muted); font-size: 11px; }
+      .test-choice > span { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+      .test-detail { border: 1px solid var(--line); border-radius: 8px; padding: clamp(26px, 4vw, 42px); background: var(--surface); }
+      .mobile-test-back { display: none; }
+      .test-detail > .context-label { display: block; }
+      .context-label { color: var(--muted); font-size: 12px; }
+      .test-detail h2 { max-width: 650px; margin: 10px 0 12px; font-size: clamp(26px, 3vw, 36px); font-weight: 500; line-height: 1.18; letter-spacing: -.02em; }
+      .test-detail > p { max-width: 650px; margin: 0; color: var(--muted); line-height: 1.58; }
+      .assignment-meta { margin: 20px 0 27px; display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 12px; }
+      .question-index-head { margin-bottom: 9px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+      .question-index-head h3 { margin: 0; font-size: 18px; font-weight: 500; }
+      .question-index-head span { color: var(--muted); font-size: 12px; }
+      .assignment-questions { border-top: 1px solid var(--line); }
+      .assignment-question { width: 100%; min-height: 74px; border: 0; border-bottom: 1px solid var(--line); padding: 12px 4px; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 13px; align-items: center; background: transparent; color: var(--ink); text-align: left; }
+      .assignment-question:hover { background: var(--paper); }
+      .assignment-question[data-status="draft"] { box-shadow: inset 3px 0 0 var(--yellow); padding-left: 12px; }
+      .assignment-question[data-status="skipped"] { color: var(--muted); }
+      .assignment-question-number { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+      .assignment-question-copy strong { display: block; font-size: 14px; font-weight: 500; line-height: 1.42; }
+      .assignment-question-copy small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+      .assignment-question-action { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+      .attempt { width: min(100%, 980px); margin: 0 auto; }
+      .attempt-top { margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+      .back-button { min-height: 44px; border: 0; padding: 0 4px; display: inline-flex; align-items: center; gap: 8px; background: transparent; color: var(--ink); font-weight: 600; }
+      .attempt-count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+      .question-sheet { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+      .question-main { padding: clamp(24px, 3.2vw, 34px); }
+      .question-main h1 { max-width: 760px; margin: 10px 0 14px; font-family: var(--font-display); font-size: clamp(28px, 3.5vw, 38px); font-weight: 500; line-height: 1.24; letter-spacing: -.015em; text-wrap: balance; }
+      .question-main p { margin: 0; color: var(--muted); line-height: 1.55; }
+      .criteria-details { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 9px; }
+      .criteria-details summary { min-height: 44px; display: flex; align-items: center; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
+      .criteria-details p { max-width: 680px; margin: 0 0 4px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+      .response-area { margin-top: 18px; }
+      .voice-composer { min-height: 176px; border-radius: 12px; padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 1fr; gap: 16px; background: var(--ink); color: white; }
+      .voice-head h2 { margin: 0; font-size: 19px; font-weight: 500; }
+      .voice-head p { margin: 7px 0 0; color: #bdbdbd; font-size: 12px; line-height: 1.5; }
+      .voice-composer .waveform { grid-column: 1 / -1; width: 100%; height: 44px; gap: clamp(3px, .45vw, 6px); }
+      .voice-composer .waveform span { flex: 1 1 3px; max-width: 5px; }
+      .voice-button { min-width: 158px; min-height: 52px; border: 0; border-radius: 9px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; background: var(--yellow); color: var(--ink); font-weight: 600; }
+      .voice-button[aria-pressed="true"] { background: white; }
+      .text-alternative { margin-top: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+      .text-alternative summary { min-height: 48px; padding: 0 16px; display: flex; align-items: center; font-size: 13px; font-weight: 500; cursor: pointer; }
+      .text-alternative[open] summary { border-bottom: 1px solid var(--line); }
+      .response-field { min-height: 180px; padding: 16px; display: grid; grid-template-rows: auto 1fr auto; background: var(--surface); }
+      .response-field label { font-size: 13px; font-weight: 600; }
+      .response-field textarea { width: 100%; min-height: 110px; border: 0; resize: vertical; padding: 12px 0; color: var(--ink); line-height: 1.5; outline: 0; }
+      .response-field small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+      .attempt-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 10px; }
+      .attempt-actions [data-skip-question] { margin-right: auto; }
+
+      .results-screen { width: min(100%, 1060px); }
+      .result-summary { border-bottom: 1px solid var(--line); }
+      .result-copy { padding: 0 0 clamp(26px, 4vw, 36px); }
+      .result-copy h2 { max-width: 760px; margin: 10px 0; font-size: clamp(24px, 3vw, 32px); font-weight: 500; line-height: 1.22; letter-spacing: -.018em; text-wrap: balance; }
+      .result-copy p { max-width: 690px; margin: 0; color: var(--muted); line-height: 1.57; }
+      .result-meta { margin-top: 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+      .result-outcome { color: var(--ink); font-size: 13px; font-weight: 600; }
+      .result-layout { width: min(100%, 820px); margin-top: 30px; display: grid; gap: 28px; }
+      .section-title { margin-bottom: 13px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+      .section-title h2 { margin: 0; font-size: 20px; font-weight: 500; }
+      .review-player { min-height: 44px; border: 0; border-radius: 8px; padding: 0 13px; display: inline-flex; align-items: center; gap: 8px; background: var(--ink); color: white; font-size: 12px; font-weight: 600; }
+      .review-player[aria-pressed="true"] { background: var(--yellow); color: var(--ink); }
+      .answer-review { border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
+      .review-question { padding: 20px 22px; background: var(--paper); }
+      .review-question span { color: var(--muted); font-size: 11px; }
+      .review-question p { margin: 8px 0 0; font-family: var(--font-display); font-size: 16px; font-weight: 500; line-height: 1.5; }
+      .transcript-line { padding: 19px 22px; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 14px; }
+      .transcript-line + .transcript-line { border-top: 1px solid var(--line); }
+      .transcript-time { color: var(--muted); font-size: 11px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+      .transcript-copy { margin: 0; font-family: var(--font-ui); font-size: 15px; line-height: 1.64; }
+      .transcript-copy mark { padding: 1px 3px; background: var(--yellow-soft); color: var(--ink); }
+      .rubric-list { display: grid; gap: 6px; }
+      .rubric-details { margin-top: 2px; }
+      .rubric-details summary { min-height: 48px; border: 1px solid var(--line); border-radius: 7px; padding: 0 14px; display: flex; align-items: center; font-size: 13px; font-weight: 500; cursor: pointer; }
+      .rubric-details[open] summary { margin-bottom: 8px; }
+      .rubric-row { padding: 14px 15px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; background: var(--canvas); }
+      .rubric-row h3 { margin: 0; font-size: 14px; font-weight: 600; }
+      .rubric-row p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .rubric-mark { min-width: 48px; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .recommendation { padding: 4px 0 4px 16px; border-left: 3px solid var(--yellow); }
+      .recommendation p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+      .recommendation cite { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; font-style: normal; }
+      .result-actions { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 9px; }
+      .transcript-details { border-top: 1px solid var(--line); padding-top: 9px; }
+      .transcript-details > summary { min-height: 48px; display: flex; align-items: center; font-size: 18px; font-weight: 500; cursor: pointer; }
+      .transcript-details[open] > summary { margin-bottom: 12px; }
+
+      .import-screen { width: min(100%, 1000px); }
+      .builder-tabs { margin: -8px 0 28px; border-bottom: 1px solid var(--line); display: flex; gap: 26px; }
+      .builder-tabs button { min-height: 48px; border: 0; border-bottom: 3px solid transparent; padding: 0 2px; background: transparent; color: var(--muted); font-weight: 500; }
+      .builder-tabs button[aria-current="page"] { border-bottom-color: var(--yellow); color: var(--ink); }
+      .import-progress { margin: 0 0 38px; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); list-style: none; counter-reset: import-step; }
+      .import-progress li { min-height: 58px; border-bottom: 1px solid var(--line); padding: 0 10px 12px 0; display: flex; align-items: flex-end; gap: 9px; color: var(--muted); font-size: 12px; counter-increment: import-step; }
+      .import-progress li::before { content: counter(import-step); width: 24px; height: 24px; border: 1px solid var(--line-strong); border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+      .import-progress li[data-state="current"] { border-bottom: 3px solid var(--ink); color: var(--ink); font-weight: 600; }
+      .import-progress li[data-state="current"]::before { border-color: var(--yellow); background: var(--yellow); color: var(--ink); }
+      .import-progress li[data-state="done"] { color: var(--ink); }
+      .import-progress li[data-state="done"]::before { border-color: var(--ink); background: var(--ink); color: white; }
+      .import-step { width: min(100%, 820px); }
+      .import-step[hidden], .source-panel[hidden], .processing-panel[hidden], .candidate-editor[hidden] { display: none; }
+      .step-intro { margin-bottom: 24px; }
+      .step-intro .context-label { display: block; margin-bottom: 8px; }
+      .step-intro h2 { max-width: 720px; margin: 0; font-size: clamp(24px, 3vw, 32px); font-weight: 500; line-height: 1.25; letter-spacing: -.018em; }
+      .step-intro p { max-width: 680px; margin: 10px 0 0; color: var(--muted); line-height: 1.55; }
+      .source-switch { margin-bottom: 4px; border-bottom: 1px solid var(--line); display: flex; gap: 26px; }
+      .source-switch button { min-height: 48px; border: 0; border-bottom: 3px solid transparent; padding: 0 2px; background: transparent; color: var(--muted); font-weight: 500; }
+      .source-switch button[aria-selected="true"] { border-bottom-color: var(--yellow); color: var(--ink); }
+      .source-panel { padding: 26px 0 0; }
+      .source-form { display: grid; gap: 16px; }
+      .source-form > label, .settings-grid label, .candidate-editor label { display: grid; gap: 7px; font-size: 13px; font-weight: 600; }
+      .source-form input[type="url"], .source-form textarea, .settings-grid input, .settings-grid select, .candidate-editor textarea { width: 100%; min-height: 48px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 11px 12px; background: var(--surface); color: var(--ink); }
+      .file-field { display: grid; gap: 7px; }
+      .file-field-label { font-size: 13px; font-weight: 600; }
+      .file-picker { position: relative; min-width: 0; min-height: 64px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 7px; display: flex; align-items: center; gap: 12px; background: var(--surface); }
+      .file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+      .file-trigger { min-height: 48px; border: 1px solid var(--ink); border-radius: 6px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 0 0 auto; color: var(--ink); background: var(--yellow-soft); cursor: pointer; font-size: 13px; font-weight: 600; }
+      .file-trigger:hover { background: var(--yellow); }
+      .file-input:focus-visible + .file-trigger { outline: 3px solid var(--focus); outline-offset: 3px; }
+      .file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; font-weight: 400; }
+      .file-picker[data-has-file="true"] .file-name { color: var(--ink); font-weight: 500; }
+      .source-form textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
+      .field-help { margin: -5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .source-form .button { justify-self: start; }
+      .source-fallback { margin-top: 8px; border-top: 1px solid var(--line); }
+      .source-fallback summary { min-height: 48px; display: flex; align-items: center; color: var(--muted); cursor: pointer; font-size: 13px; }
+      .source-fallback ul { margin: 0 0 10px; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+      .youtube-preview { margin-top: 20px; border-block: 1px solid var(--line); padding: 18px 0; display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 18px; align-items: center; }
+      .youtube-preview[hidden] { display: none; }
+      .video-preview-art { width: 112px; aspect-ratio: 16 / 9; display: grid; place-items: center; background: var(--ink); color: var(--yellow); }
+      .youtube-preview strong { display: block; font-size: 14px; }
+      .youtube-preview span { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+      .youtube-preview label { margin-top: 12px; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+      .youtube-preview select { min-height: 44px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 0 10px; background: var(--surface); }
+      .youtube-preview .button { margin-top: 12px; }
+      .source-summary { margin-bottom: 18px; border-left: 3px solid var(--yellow); padding: 5px 0 5px 14px; }
+      .source-summary strong { display: block; font-size: 14px; }
+      .source-summary span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+      .fragment-list { border-top: 1px solid var(--line); }
+      .fragment-row { min-height: 82px; border-bottom: 1px solid var(--line); padding: 13px 2px; display: grid; grid-template-columns: 24px 64px minmax(0, 1fr); gap: 13px; align-items: start; cursor: pointer; }
+      .fragment-row input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--ink); }
+      .fragment-marker { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+      .fragment-copy strong { display: block; font-size: 14px; font-weight: 500; }
+      .fragment-copy small { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+      .import-actions { margin-top: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+      .import-actions .button:first-child:last-child { margin-left: auto; }
+      .import-actions .button:not(:first-child) { margin-left: auto; }
+      .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      .question-types { margin: 22px 0 0; border: 0; border-top: 1px solid var(--line); padding: 18px 0 0; }
+      .question-types legend { padding: 0 14px 0 0; font-size: 13px; font-weight: 600; }
+      .question-types div { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 12px 24px; }
+      .question-types label, .setting-check { min-height: 44px; display: inline-flex; align-items: center; gap: 9px; font-size: 13px; }
+      .question-types input, .setting-check input { width: 18px; height: 18px; accent-color: var(--ink); }
+      .setting-check { margin-top: 8px; }
+      .processing-panel { margin-top: 20px; border-left: 3px solid var(--yellow); padding: 3px 0 3px 14px; }
+      .processing-panel strong { display: block; }
+      .processing-panel span { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+      .candidate-list { border-top: 1px solid var(--line); }
+      .candidate-row { border-bottom: 1px solid var(--line); padding: 20px 2px; }
+      .candidate-row[data-state="accepted"] { box-shadow: inset 3px 0 0 var(--yellow); padding-left: 14px; }
+      .candidate-row[data-state="rejected"] .candidate-body { opacity: .5; }
+      .candidate-meta { margin-bottom: 8px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; color: var(--muted); font-size: 11px; }
+      .candidate-body strong { display: block; max-width: 720px; font-size: 16px; font-weight: 500; line-height: 1.45; }
+      .candidate-body p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .candidate-actions { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+      .candidate-actions button { min-height: 44px; border: 0; padding: 0 12px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; }
+      .candidate-actions button:first-child { border: 1px solid var(--ink); border-radius: 7px; background: var(--ink); color: white; }
+      .candidate-editor { margin-top: 12px; }
+      .candidate-editor textarea { min-height: 92px; resize: vertical; }
+      .candidate-editor .button { margin-top: 9px; }
+      .candidate-final { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 18px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+      .candidate-final span { color: var(--muted); font-size: 12px; }
+
+      .placeholder-screen { min-height: 460px; display: grid; place-items: center; text-align: center; }
+      .placeholder-screen > div { max-width: 440px; }
+      .placeholder-screen h1 { margin: 0; font-size: 34px; font-weight: 500; letter-spacing: -.02em; }
+      .placeholder-screen p { color: var(--muted); line-height: 1.55; }
+      .toast { position: fixed; right: 20px; bottom: 20px; z-index: 80; max-width: 360px; border-radius: 8px; padding: 13px 15px; background: var(--ink); color: white; font-size: 13px; }
+      .toast[hidden] { display: none; }
+
+      @media (max-width: 1080px) {
+        .tests-layout, .result-layout { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 900px) {
+        body { background: var(--paper); }
+        .app { display: block; }
+        .sidebar { display: none; }
+        .mobile-header { position: sticky; top: 0; z-index: 30; min-height: 64px; border-bottom: 1px solid var(--line); padding: 0 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: color-mix(in srgb, var(--paper) 94%, transparent); backdrop-filter: blur(14px); }
+        .mobile-header .brand { padding: 0; }
+        .mobile-user { min-width: 44px; min-height: 44px; border: 1px solid var(--ink); border-radius: 50%; display: grid; place-items: center; background: var(--paper); font-weight: 700; }
+        .main { padding: 30px 20px 106px; }
+        .main :is(button, a[href], input, textarea, select, summary) { scroll-margin-block: 84px; }
+        .bottom-nav { position: fixed; inset: auto 0 0 0; z-index: 50; min-height: 76px; border-top: 1px solid var(--line); padding: 6px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); display: grid; grid-template-columns: repeat(4, 1fr); background: color-mix(in srgb, var(--paper) 96%, transparent); backdrop-filter: blur(14px); }
+        .bottom-nav .nav-button { min-width: 0; min-height: 58px; padding: 4px 2px; display: grid; justify-items: center; align-content: center; gap: 4px; box-shadow: none; font-size: 10px; text-align: center; }
+        .bottom-nav .nav-button[aria-current="page"]::before { content: ""; position: absolute; top: -6px; width: 28px; height: 3px; background: var(--ink); }
+        .toast { right: 14px; bottom: 92px; left: 14px; max-width: none; }
+      }
+      @media (max-width: 660px) {
+        .main { padding: 25px 14px 104px; }
+        .screen-header { align-items: flex-start; display: grid; }
+        .practice-question { padding: 24px 19px 25px; }
+        .practice-question h1 { font-size: 29px; }
+        .audio-draft { grid-template-columns: auto minmax(0, 1fr); gap: 14px; padding: 16px; }
+        .recorder-cta { grid-column: 1 / -1; width: 100%; }
+        .home-grid { margin-top: 30px; }
+        .agenda-row { grid-template-columns: 46px minmax(0, 1fr) auto; }
+        .agenda-date strong { font-size: 22px; }
+        .tests-layout { gap: 20px; }
+        .test-detail { display: none; padding: 24px 19px; }
+        .tests-layout[data-detail-open="true"] .tests-index { display: none; }
+        .tests-layout[data-detail-open="true"] .test-detail { display: block; }
+        .screen[data-detail-open="true"] > .screen-header { display: none; }
+        .mobile-test-back { width: 100%; min-height: 44px; border: 0; margin: -8px 0 12px; padding: 0; display: flex; align-items: center; gap: 8px; background: transparent; color: var(--ink); font-weight: 600; }
+        .assignment-question { grid-template-columns: 28px minmax(0, 1fr); }
+        .assignment-question-action { grid-column: 2; }
+        .attempt-top { align-items: flex-start; display: grid; }
+        .question-main { padding: 24px 19px; }
+        .question-main h1 { font-size: 30px; }
+        .voice-composer { min-height: 228px; grid-template-columns: 1fr; }
+        .voice-button { width: 100%; }
+        .voice-composer .waveform { grid-column: 1; }
+        .response-field { min-height: 200px; }
+        .attempt-actions { display: grid; }
+        .attempt-actions .button { width: 100%; }
+        .result-layout { margin-top: 28px; gap: 36px; }
+        .section-title { align-items: flex-start; }
+        .result-actions { display: grid; }
+        .transcript-line { grid-template-columns: 1fr; gap: 5px; padding: 17px 18px; }
+        .review-question { padding: 18px; }
+        .builder-tabs { overflow-x: auto; gap: 22px; }
+        .builder-tabs button { flex: 0 0 auto; }
+        .source-switch { gap: 14px; overflow: visible; }
+        .source-switch button { flex: 0 1 auto; font-size: 13px; }
+        .youtube-preview { grid-template-columns: 1fr; }
+        .import-progress { margin-bottom: 28px; grid-template-columns: 1fr; }
+        .import-progress li { min-height: 42px; padding: 7px 0; align-items: center; border-bottom: 0; }
+        .import-progress li[data-state="current"] { border-bottom: 0; box-shadow: inset 3px 0 0 var(--ink); padding-left: 10px; }
+        .import-progress li[data-state="upcoming"] { display: none; }
+        .fragment-row { grid-template-columns: 24px 48px minmax(0, 1fr); }
+        .settings-grid { grid-template-columns: 1fr; }
+        .import-actions { display: grid; }
+        .import-actions .button, .import-actions .button:not(:first-child) { width: 100%; margin-left: 0; }
+        .candidate-final { align-items: stretch; display: grid; }
+      }
+      @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">К содержанию</a>
+    <div class="app">
+      <aside class="sidebar" aria-label="Основная навигация">
+        <a class="brand" href="index.html" aria-label="TuneAI, открыть лендинг"><span class="brand-mark" aria-hidden="true"></span>TuneAI</a>
+        <p class="workspace-label">Практика</p>
+        <nav class="primary-nav" data-primary-nav>
+          <button class="nav-button" type="button" data-screen-target="overview" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M5 12h9M5 16.5h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="18" cy="16.5" r="2" stroke="currentColor" stroke-width="1.8"/></svg>Сегодня</button>
+          <button class="nav-button" type="button" data-screen-target="tests"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Задания</button>
+          <button class="nav-button" type="button" data-screen-target="results"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h2l2-5 3 10 2-6 2 3h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Разборы</button>
+          <button class="nav-button" type="button" data-screen-target="profile"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c.8-4 3.1-6 7-6s6.2 2 7 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Профиль</button>
+        </nav>
+        <p class="workspace-label">Преподавателю</p>
+        <nav class="primary-nav" aria-label="Инструменты преподавателя">
+          <button class="nav-button" type="button" data-screen-target="import"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3h9l3 3v15H6V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15 3v4h4M12 17V10M9 13l3-3 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Импорт лекции</button>
+        </nav>
+        <div class="user-card"><div class="avatar">А</div><div><strong>Анна Петрова</strong><small>Студент и автор</small></div></div>
+      </aside>
+      <header class="mobile-header">
+        <a class="brand" href="index.html" aria-label="TuneAI, открыть лендинг"><span class="brand-mark" aria-hidden="true"></span>TuneAI</a>
+        <button class="mobile-user" type="button" aria-label="Открыть профиль" data-screen-target="profile">А</button>
+      </header>
+
+      <main class="main" id="workspace">
+        <section class="screen overview-screen" data-screen="overview" aria-labelledby="overview-title">
+          <header class="today-header"><time datetime="2026-08-25">Вторник, 25 августа</time></header>
+          <article class="practice-board" aria-labelledby="overview-title">
+            <div class="practice-question"><div class="question-context"><strong>Архитектура надёжных сервисов</strong><span class="question-count">2 из 5</span></div><h1 id="overview-title" tabindex="-1">Почему transactional outbox помогает не терять события?</h1></div>
+            <div class="audio-draft">
+              <div class="device-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+              <div class="draft-identity"><strong>Черновик ответа</strong><span>00:38 · осталось около 12 минут</span></div>
+              <button class="recorder-cta" type="button" data-open-attempt>Продолжить запись <span aria-hidden="true">→</span></button>
+            </div>
+          </article>
+          <div class="home-grid">
+            <section aria-labelledby="agenda-title"><div class="section-heading"><h2 id="agenda-title">Дальше</h2><button class="text-action" type="button" data-screen-target="tests">Все задания <span aria-hidden="true">→</span></button></div><div class="agenda-list">
+              <button class="agenda-row" type="button" data-screen-target="tests"><time class="agenda-date" datetime="2026-08-27"><strong>27</strong><span>авг</span></time><span class="agenda-copy"><strong>Надёжность доставки сообщений</strong><small>3 вопроса</small></span><span class="agenda-arrow" aria-hidden="true">→</span></button>
+              <button class="agenda-row" type="button" data-screen-target="tests"><time class="agenda-date" datetime="2026-08-30"><strong>30</strong><span>авг</span></time><span class="agenda-copy"><strong>Согласованность в распределённых системах</strong><small>7 вопросов</small></span><span class="agenda-arrow" aria-hidden="true">→</span></button>
+            </div></section>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="tests" aria-labelledby="tests-title" hidden>
+          <header class="screen-header"><div><h1 id="tests-title" tabindex="-1">Задания</h1><p>Выберите задание, затем вопрос. Отвечать можно в любом порядке.</p></div></header>
+          <div class="tests-layout">
+            <section class="tests-index" aria-label="Список заданий"><input class="test-filter" type="search" aria-label="Найти задание" placeholder="Найти задание" /><button class="test-choice" type="button" aria-pressed="true" data-test-choice data-test-id="reliable"><div><strong>Архитектура надёжных сервисов</strong><small>Черновик · вопрос 2 из 5</small></div><span>12 мин</span></button><button class="test-choice" type="button" aria-pressed="false" data-test-choice data-test-id="distributed"><div><strong>Основы распределённых систем</strong><small>До 30 августа · 7 вопросов</small></div><span>Не начато</span></button><button class="test-choice" type="button" aria-pressed="false" data-test-choice data-test-id="databases"><div><strong>Введение в базы данных</strong><small>Завершено 21 августа</small></div><span>8,6 / 10</span></button></section>
+            <article class="test-detail"><button class="mobile-test-back" type="button" data-close-test-detail><span aria-hidden="true">←</span> Все задания</button><span class="context-label" id="assignment-state">Текущий черновик</span><h2 id="assignment-title">Архитектура надёжных сервисов</h2><p id="assignment-description">Пять коротких объяснений о доставке сообщений, повторной обработке и устойчивости сервисов.</p><div class="assignment-meta"><span id="assignment-deadline">Срок: 27 августа</span><span id="assignment-duration">Около 12 минут</span></div><section aria-labelledby="assignment-questions-title"><div class="question-index-head"><h3 id="assignment-questions-title">Вопросы</h3><span>Можно отвечать в любом порядке</span></div><div class="assignment-questions" id="assignment-question-list"></div></section></article>
+          </div>
+        </section>
+
+        <section class="screen attempt" data-screen="attempt" aria-labelledby="attempt-title" hidden>
+          <div class="attempt-top"><button class="back-button" type="button" data-back><span aria-hidden="true">←</span> К вопросам</button><span class="attempt-count">Вопрос 2 из 5</span></div>
+          <article class="question-sheet"><div class="question-main"><span class="context-label">Доставка событий</span><h1 id="attempt-title" tabindex="-1">Почему transactional outbox помогает не терять события?</h1><p>Ответьте своими словами и приведите один практический пример.</p><details class="criteria-details"><summary>Что будет оцениваться</summary><p>Атомарность записи, повторная отправка и идемпотентность обработчика.</p></details></div></article>
+          <div class="response-area"><section class="voice-composer" aria-labelledby="voice-title"><div class="voice-head"><h2 id="voice-title">Ответить голосом</h2><p>Можно сделать паузу и продолжить запись позже.</p></div><button class="voice-button" type="button" aria-pressed="false" data-voice><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Начать запись</span></button><div class="waveform" aria-hidden="true"><span style="--h:12px"></span><span style="--h:30px"></span><span style="--h:18px"></span><span style="--h:40px"></span><span style="--h:24px"></span><span style="--h:35px"></span><span style="--h:16px"></span><span style="--h:42px"></span><span style="--h:28px"></span><span style="--h:20px"></span><span style="--h:38px"></span><span style="--h:14px"></span><span style="--h:39px"></span><span style="--h:25px"></span><span style="--h:33px"></span><span style="--h:11px"></span></div></section><details class="text-alternative"><summary>Ответить текстом</summary><div class="response-field"><label for="answer-text">Ваш ответ</label><textarea id="answer-text" placeholder="Начните с главной мысли…"></textarea><small id="answer-state">Черновик сохраняется только в этом прототипе</small></div></details></div>
+          <div class="attempt-actions"><button class="button button-secondary" type="button" data-skip-question>Пропустить пока</button><button class="button button-secondary" type="button" data-save>Сохранить черновик</button><button class="button" type="button" data-submit-answer>Отправить ответ</button></div>
+        </section>
+
+        <section class="screen results-screen" data-screen="results" aria-labelledby="results-title" hidden>
+          <header class="screen-header"><div><h1 id="results-title" tabindex="-1">Разбор ответа</h1></div></header>
+          <article class="result-summary"><div class="result-copy"><span class="context-label">Архитектура надёжных сервисов · вопрос 2</span><h2>Главная идея раскрыта. Не хватило конкретного способа защиты от дублей.</h2><p>Вы связали атомарную запись и повторную доставку. Для полного ответа назовите, где обработчик хранит идентификаторы уже принятых событий.</p><div class="result-meta"><strong class="result-outcome">8,6 из 10 · зачтено</strong><span>Ирина Л. · 21 августа</span></div></div></article>
+          <div class="result-layout">
+            <section aria-labelledby="criteria-title"><div class="section-title"><h2 id="criteria-title">Что улучшить</h2></div><section class="recommendation" aria-label="Комментарий Ирины"><p>Добавьте один конкретный механизм: сохраняйте <code>event_id</code> уже обработанных событий и проверяйте его перед изменением данных.</p><cite>Ирина Л.</cite></section><details class="rubric-details"><summary>Оценка по четырём критериям</summary><div class="rubric-list"><article class="rubric-row"><div><h3>Атомарность записи</h3><p>Связь бизнес-изменения и outbox объяснена точно.</p></div><strong class="rubric-mark">3 / 3</strong></article><article class="rubric-row"><div><h3>Повторная доставка</h3><p>Механизм повторной отправки раскрыт.</p></div><strong class="rubric-mark">2,8 / 3</strong></article><article class="rubric-row"><div><h3>Защита от дублей</h3><p>Риск назван, но способ защиты не приведён.</p></div><strong class="rubric-mark">1,8 / 2</strong></article><article class="rubric-row"><div><h3>Практический пример</h3><p>Пример обозначен, но не доведён до реализации.</p></div><strong class="rubric-mark">1 / 2</strong></article></div></details><div class="result-actions"><button class="button" type="button" data-screen-target="tests">Выбрать следующее задание</button><button class="button button-secondary" type="button" data-retry>Повторить этот вопрос</button></div></section>
+            <details class="transcript-details"><summary id="answer-review-title">Запись и расшифровка</summary><div class="section-title"><span></span><button class="review-player" type="button" aria-pressed="false" data-replay><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>Слушать · 1:08</span></button></div><article class="answer-review"><div class="review-question"><span>Вопрос</span><p>Почему transactional outbox помогает не терять события?</p></div><div class="transcript-line"><span class="transcript-time">00:08</span><p class="transcript-copy">Событие сохраняется <mark>в той же транзакции</mark>, что и изменение основных данных, поэтому эти операции не расходятся.</p></div><div class="transcript-line"><span class="transcript-time">00:31</span><p class="transcript-copy">Отдельный worker читает таблицу outbox и отправляет сообщения. Если отправка не удалась, её можно повторить.</p></div><div class="transcript-line"><span class="transcript-time">00:52</span><p class="transcript-copy">Получатель должен учитывать, что одно событие может прийти больше одного раза.</p></div></article></details>
+          </div>
+        </section>
+
+        <section class="screen import-screen" data-screen="import" aria-labelledby="import-title" hidden>
+          <header class="screen-header"><div><h1 id="import-title" tabindex="-1">Импорт лекции</h1><p>Соберите вопросы из материала и добавьте только проверенные варианты в черновик задания.</p></div></header>
+          <nav class="builder-tabs" aria-label="Способ добавления вопросов"><button type="button" data-manual-builder>Вопросы вручную</button><button type="button" aria-current="page">Импорт лекции</button></nav>
+          <ol class="import-progress" aria-label="Этапы импорта">
+            <li data-import-progress="1" data-state="current">Источник</li>
+            <li data-import-progress="2" data-state="upcoming">Фрагменты</li>
+            <li data-import-progress="3" data-state="upcoming">Настройки</li>
+            <li data-import-progress="4" data-state="upcoming">Вопросы</li>
+          </ol>
+
+          <section class="import-step" data-import-step="1" aria-labelledby="import-source-title">
+            <div class="step-intro"><span class="context-label">Шаг 1 из 4</span><h2 id="import-source-title">Откуда взять содержание?</h2><p>Сначала проверьте сам материал. Настройки генерации появятся после выбора страниц или временных фрагментов.</p></div>
+            <div class="source-switch" role="tablist" aria-label="Источник лекции">
+              <button type="button" role="tab" aria-selected="true" aria-controls="source-file" data-source-tab="file">PDF или PPTX</button>
+              <button type="button" role="tab" aria-selected="false" aria-controls="source-youtube" data-source-tab="youtube">YouTube</button>
+              <button type="button" role="tab" aria-selected="false" aria-controls="source-text" data-source-tab="text">Текст или субтитры</button>
+            </div>
+            <section class="source-panel" id="source-file" role="tabpanel" data-source-panel="file">
+              <form class="source-form" data-source-form="file"><div class="file-field"><label class="file-field-label" for="lecture-file">Файл лекции</label><div class="file-picker" data-file-picker data-has-file="false"><input class="file-input" id="lecture-file" name="lecture_file" type="file" accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" aria-describedby="lecture-file-name" /><label class="file-trigger" for="lecture-file"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3h9l3 3v15H6V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15 3v4h4M12 17V10M9 13l3-3 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-file-trigger-label>Выбрать PDF/PPTX</span></label><span class="file-name" id="lecture-file-name" role="status" aria-live="polite" aria-atomic="true" data-file-name>Файл не выбран</span></div></div><p class="field-help">PDF или PPTX до 100 МБ. Сохраним номера страниц, слайдов и заметки докладчика.</p><button class="button" type="submit">Разобрать файл</button></form>
+              <details class="source-fallback"><summary>Что произойдёт, если в PDF нет текста?</summary><ul><li>Покажем, на каких страницах отсутствует текстовый слой.</li><li>Предложим добавить OCR отдельным следующим этапом.</li><li>Исходный файл и уже извлечённые страницы сохранятся.</li></ul></details>
+            </section>
+            <section class="source-panel" id="source-youtube" role="tabpanel" data-source-panel="youtube" hidden>
+              <form class="source-form" data-source-form="youtube"><label>Ссылка на видео<input name="youtube_url" type="url" required pattern="https://(www\.)?(youtube\.com|youtu\.be)/.+" title="Укажите ссылку youtube.com или youtu.be" placeholder="https://youtube.com/watch?v=…" /></label><p class="field-help">В первой версии поддерживаются публичные видео с доступными субтитрами.</p><button class="button" type="submit">Проверить видео</button></form>
+              <div class="youtube-preview" data-youtube-preview hidden><div class="video-preview-art" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="m9 6 9 6-9 6V6Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></div><div><strong>Надёжная доставка событий</strong><span>Курс «Архитектура сервисов» · 32:18 · публичное видео</span><label>Субтитры<select><option>Русский · автоматические</option><option>English · ручные</option></select></label><button class="button button-secondary" type="button" data-use-youtube>Использовать субтитры</button></div></div>
+              <details class="source-fallback"><summary>Если у видео нет субтитров</summary><ul><li>Загрузить файл .srt, .vtt или .txt.</li><li>Запустить распознавание через SpeechKit после подтверждения длительности и стоимости.</li><li>Отказаться от импорта и добавить вопросы вручную.</li></ul></details>
+            </section>
+            <section class="source-panel" id="source-text" role="tabpanel" data-source-panel="text" hidden>
+              <form class="source-form" data-source-form="text"><label>Текст лекции<textarea name="lecture_text" placeholder="Вставьте конспект или расшифровку…"></textarea></label><div class="file-field"><label class="file-field-label" for="subtitle-file">Или файл субтитров</label><div class="file-picker" data-file-picker data-has-file="false"><input class="file-input" id="subtitle-file" name="subtitle_file" type="file" accept=".srt,.vtt,.txt,text/plain,text/vtt" aria-describedby="subtitle-file-name" /><label class="file-trigger" for="subtitle-file"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3h9l3 3v15H6V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15 3v4h4M12 17V10M9 13l3-3 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-file-trigger-label>Выбрать SRT/VTT/TXT</span></label><span class="file-name" id="subtitle-file-name" role="status" aria-live="polite" aria-atomic="true" data-file-name>Файл не выбран</span></div></div><button class="button" type="submit">Разделить на фрагменты</button></form>
+            </section>
+          </section>
+
+          <section class="import-step" data-import-step="2" aria-labelledby="import-fragments-title" hidden>
+            <div class="step-intro"><span class="context-label">Шаг 2 из 4</span><h2 id="import-fragments-title">Выберите полезные фрагменты</h2><p>Исключите титульные страницы, организационные объявления и части, по которым не нужно задавать вопросы.</p></div>
+            <div class="source-summary"><strong id="selected-source-name">Лекция_распределённые_системы.pdf</strong><span id="selected-source-meta">6 страниц · текст извлечён</span></div>
+            <div class="fragment-list" id="import-fragments"></div>
+            <div class="import-actions"><button class="button button-secondary" type="button" data-import-go="1">Назад к источнику</button><button class="button" type="button" data-import-go="3">Настроить вопросы</button></div>
+          </section>
+
+          <section class="import-step" data-import-step="3" aria-labelledby="import-settings-title" hidden>
+            <div class="step-intro"><span class="context-label">Шаг 3 из 4</span><h2 id="import-settings-title">Какие вопросы подготовить?</h2><p>Настройки относятся только к выбранным фрагментам. Все кандидаты можно будет изменить или отклонить.</p></div>
+            <form data-generation-form>
+              <div class="settings-grid"><label>Количество вопросов<input name="question_count" type="number" min="1" max="30" value="8" /></label><label>Язык<select name="language"><option>Русский</option><option>English</option></select></label><label>Сложность<select name="difficulty"><option>Сбалансированная</option><option>Базовая</option><option>Продвинутая</option></select></label><label>Распределение<select name="distribution"><option>Равномерно по разделам</option><option>Больше по ключевым темам</option></select></label></div>
+              <fieldset class="question-types"><legend>Типы вопросов</legend><div><label><input type="checkbox" checked /> Развёрнутый ответ</label><label><input type="checkbox" checked /> Один вариант</label><label><input type="checkbox" /> Несколько вариантов</label></div></fieldset>
+              <label class="setting-check"><input type="checkbox" checked /> Добавлять объяснение правильного ответа</label>
+              <label class="setting-check"><input type="checkbox" checked /> Сохранять ссылку на страницу или время видео</label>
+              <div class="import-actions"><button class="button button-secondary" type="button" data-import-go="2">Назад к фрагментам</button><button class="button" type="submit" data-generate-candidates>Сгенерировать вопросы</button></div>
+              <div class="processing-panel" role="status" aria-live="polite" data-processing hidden><strong>Готовим вопросы</strong><span data-processing-text>Извлечённый текст уже сохранён. Генерация выполняется в фоне.</span></div>
+            </form>
+          </section>
+
+          <section class="import-step" data-import-step="4" aria-labelledby="import-candidates-title" hidden>
+            <div class="step-intro"><span class="context-label">Шаг 4 из 4</span><h2 id="import-candidates-title">Проверьте вопросы</h2><p>Источник виден рядом с каждым кандидатом. Принятые вопросы попадут в обычный черновик задания.</p></div>
+            <div class="candidate-list" data-candidate-list>
+              <article class="candidate-row" data-candidate><div class="candidate-meta"><span>Развёрнутый ответ</span><span data-source-reference>Страницы 3–4</span></div><div class="candidate-body"><strong>Почему повторная доставка сообщения требует идемпотентного обработчика?</strong><p>Ожидаемый ответ: повтор одного события не должен повторно изменять состояние системы.</p></div><div class="candidate-actions"><button type="button" data-candidate-accept>Принять</button><button type="button" data-candidate-edit>Изменить</button><button type="button" data-candidate-reject>Отклонить</button></div><form class="candidate-editor" hidden><label>Текст вопроса<textarea>Почему повторная доставка сообщения требует идемпотентного обработчика?</textarea></label><button class="button button-secondary" type="submit">Сохранить изменение</button></form></article>
+              <article class="candidate-row" data-candidate><div class="candidate-meta"><span>Один вариант</span><span data-source-reference>Страница 5</span></div><div class="candidate-body"><strong>Где transactional outbox сохраняет событие до отправки?</strong><p>Правильный ответ: в той же базе и транзакции, что и бизнес-изменение.</p></div><div class="candidate-actions"><button type="button" data-candidate-accept>Принять</button><button type="button" data-candidate-edit>Изменить</button><button type="button" data-candidate-reject>Отклонить</button></div><form class="candidate-editor" hidden><label>Текст вопроса<textarea>Где transactional outbox сохраняет событие до отправки?</textarea></label><button class="button button-secondary" type="submit">Сохранить изменение</button></form></article>
+              <article class="candidate-row" data-candidate><div class="candidate-meta"><span>Несколько вариантов</span><span data-source-reference>Страница 6</span></div><div class="candidate-body"><strong>Какие механизмы помогают безопасно повторять обработку сообщений?</strong><p>Кандидаты ответа: event_id, журнал обработанных событий, идемпотентная операция.</p></div><div class="candidate-actions"><button type="button" data-candidate-accept>Принять</button><button type="button" data-candidate-edit>Изменить</button><button type="button" data-candidate-reject>Отклонить</button></div><form class="candidate-editor" hidden><label>Текст вопроса<textarea>Какие механизмы помогают безопасно повторять обработку сообщений?</textarea></label><button class="button button-secondary" type="submit">Сохранить изменение</button></form></article>
+            </div>
+            <div class="candidate-final"><span data-accepted-count>Принято 0 из 3</span><button class="button" type="button" data-add-candidates disabled>Добавить в черновик задания</button></div>
+          </section>
+        </section>
+
+        <section class="screen placeholder-screen" data-screen="profile" aria-labelledby="profile-title" hidden><div><h1 id="profile-title" tabindex="-1">Профиль</h1><p>Личные данные и доступы не смешиваются с учебным потоком.</p><a class="button button-secondary" href="index.html">Открыть лендинг прототипа</a></div></section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="Мобильная навигация">
+        <button class="nav-button" type="button" data-screen-target="overview" aria-current="page"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14M5 12h9M5 16.5h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="18" cy="16.5" r="2" stroke="currentColor" stroke-width="1.8"/></svg>Сегодня</button>
+        <button class="nav-button" type="button" data-screen-target="tests"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Задания</button>
+        <button class="nav-button" type="button" data-screen-target="results"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h2l2-5 3 10 2-6 2 3h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Разборы</button>
+        <button class="nav-button" type="button" data-screen-target="import"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3h9l3 3v15H6V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15 3v4h4M12 17V10M9 13l3-3 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Импорт</button>
+      </nav>
+    </div>
+
+    <div class="toast" role="status" aria-live="polite" hidden id="toast"></div>
+    <script>
+      const screens = [...document.querySelectorAll("[data-screen]")];
+      const screenTriggers = [...document.querySelectorAll("[data-screen-target]")];
+      const navButtons = [...document.querySelectorAll(".nav-button[data-screen-target]")];
+      const toast = document.querySelector("#toast");
+      const testsLayout = document.querySelector(".tests-layout");
+      const testsScreen = testsLayout.closest("[data-screen]");
+      const questionList = document.querySelector("#assignment-question-list");
+      const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+      const assignments = {
+        reliable: {
+          state: "Текущий черновик", title: "Архитектура надёжных сервисов", description: "Пять коротких объяснений о доставке сообщений, повторной обработке и устойчивости сервисов.", deadline: "Срок: 27 августа", duration: "Около 12 минут",
+          questions: [
+            {title:"Почему dual write может привести к потере события?", context:"Согласованность записи", status:"done", mode:"Ответ готов"},
+            {title:"Почему transactional outbox помогает не терять события?", context:"Доставка событий", status:"draft", mode:"Черновик 00:38"},
+            {title:"Что делает consumer идемпотентным?", context:"Повторная обработка", status:"new", mode:"Голос или текст"},
+            {title:"Когда сообщение нужно отправить в dead-letter queue?", context:"Обработка ошибок", status:"new", mode:"Голос или текст"},
+            {title:"Как сохранить порядок событий для одной сущности?", context:"Порядок доставки", status:"new", mode:"Голос или текст"}
+          ]
+        },
+        distributed: {
+          state: "Не начато", title: "Основы распределённых систем", description: "Семь вопросов о согласованности, репликации и отказах между узлами.", deadline: "Срок: 30 августа", duration: "Около 20 минут",
+          questions: ["Что означает частичный отказ в распределённой системе?","Чем сильная согласованность отличается от eventual consistency?","Зачем реплике нужен журнал изменений?","Как quorum влияет на чтение и запись?","Когда конфликт версий нельзя разрешить автоматически?","Почему сетевой тайм-аут не доказывает отказ узла?","Какие гарантии даёт at-least-once доставка?"].map((title, index) => ({title, context:`Раздел ${index + 1}`, status:"new", mode:"Голос или текст"}))
+        },
+        databases: {
+          state: "Завершено 21 августа", title: "Введение в базы данных", description: "Четыре базовых вопроса о транзакциях, индексах и ограничениях целостности.", deadline: "Завершено", duration: "Результат: 8,6 из 10",
+          questions: ["Какие свойства объединяет ACID?","Когда индекс ускоряет запрос, а когда мешает записи?","Зачем базе внешний ключ?","Чем нормализация помогает целостности данных?"].map((title, index) => ({title, context:`Вопрос ${index + 1}`, status:"done", mode:"Ответ разобран"}))
+        }
+      };
+      const questionStatusLabels = {done:"Повторить", draft:"Продолжить", new:"Ответить", skipped:"Вернуться"};
+      let selectedAssignmentId = "reliable";
+      let selectedQuestionIndex = 1;
+
+      function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]); }
+      function showToast(message) { toast.textContent = message; toast.hidden = false; clearTimeout(showToast.timer); showToast.timer = setTimeout(() => { toast.hidden = true; }, 3200); }
+      function clearTestDetail() { delete testsLayout.dataset.detailOpen; delete testsScreen.dataset.detailOpen; }
+      function showScreen(id, {push = true, focus = push, preserveTestDetail = false} = {}) {
+        if (!screens.some((screen) => screen.dataset.screen === id)) return;
+        if (id === "tests" && !preserveTestDetail) clearTestDetail();
+        screens.forEach((screen) => { screen.hidden = screen.dataset.screen !== id; });
+        navButtons.forEach((button) => { const activeId = id === "attempt" ? "tests" : id; if (button.dataset.screenTarget === activeId) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current"); });
+        if (push) history.pushState({screen:id}, "", `#${id}`);
+        window.scrollTo({top:0, behavior:reducedMotion.matches ? "auto" : "smooth"});
+        if (focus) requestAnimationFrame(() => document.querySelector(`[data-screen="${id}"] h1`)?.focus({preventScroll:true}));
+      }
+      function renderAssignment(id) {
+        selectedAssignmentId = id;
+        const assignment = assignments[id];
+        document.querySelector("#assignment-state").textContent = assignment.state;
+        document.querySelector("#assignment-title").textContent = assignment.title;
+        document.querySelector("#assignment-description").textContent = assignment.description;
+        document.querySelector("#assignment-deadline").textContent = assignment.deadline;
+        document.querySelector("#assignment-duration").textContent = assignment.duration;
+        questionList.innerHTML = assignment.questions.map((question, index) => `<button class="assignment-question" type="button" data-question-index="${index}" data-status="${question.status}"><span class="assignment-question-number">${String(index + 1).padStart(2,"0")}</span><span class="assignment-question-copy"><strong>${escapeHtml(question.title)}</strong><small>${escapeHtml(question.mode)}</small></span><span class="assignment-question-action">${questionStatusLabels[question.status]} →</span></button>`).join("");
+      }
+      function openQuestionList() {
+        showScreen("tests", {preserveTestDetail:true});
+        if (matchMedia("(max-width: 660px)").matches) { testsLayout.dataset.detailOpen = "true"; testsScreen.dataset.detailOpen = "true"; }
+      }
+      function openQuestion(index) {
+        const assignment = assignments[selectedAssignmentId];
+        const question = assignment.questions[index];
+        selectedQuestionIndex = index;
+        document.querySelector(".attempt-count").textContent = `Вопрос ${index + 1} из ${assignment.questions.length}`;
+        document.querySelector(".question-main .context-label").textContent = question.context;
+        document.querySelector("#attempt-title").textContent = question.title;
+        document.querySelector(".question-main > p").textContent = "Ответьте своими словами и приведите один практический пример.";
+        document.querySelector(".criteria-details").open = false;
+        document.querySelector(".text-alternative").open = false;
+        showScreen("attempt");
+      }
+
+      renderAssignment(selectedAssignmentId);
+      screenTriggers.forEach((button) => button.addEventListener("click", () => showScreen(button.dataset.screenTarget)));
+      document.querySelectorAll("[data-open-attempt]").forEach((button) => button.addEventListener("click", () => openQuestion(selectedQuestionIndex)));
+      document.querySelector("[data-back]").addEventListener("click", openQuestionList);
+      document.querySelectorAll("[data-test-choice]").forEach((button) => button.addEventListener("click", () => {
+        document.querySelectorAll("[data-test-choice]").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+        renderAssignment(button.dataset.testId);
+        if (matchMedia("(max-width: 660px)").matches) { testsLayout.dataset.detailOpen = "true"; testsScreen.dataset.detailOpen = "true"; window.scrollTo({top:0, behavior:reducedMotion.matches ? "auto" : "smooth"}); }
+        else showToast(`Открыты вопросы: ${assignments[selectedAssignmentId].title}`);
+      }));
+      questionList.addEventListener("click", (event) => { const button = event.target.closest("[data-question-index]"); if (button) openQuestion(Number(button.dataset.questionIndex)); });
+      document.querySelector("[data-close-test-detail]").addEventListener("click", () => { clearTestDetail(); window.scrollTo({top:0, behavior:reducedMotion.matches ? "auto" : "smooth"}); });
+      document.querySelector(".test-filter").addEventListener("input", (event) => { const query = event.currentTarget.value.trim().toLowerCase(); document.querySelectorAll("[data-test-choice]").forEach((button) => { button.hidden = !button.textContent.toLowerCase().includes(query); }); });
+      document.querySelector("[data-skip-question]").addEventListener("click", () => { assignments[selectedAssignmentId].questions[selectedQuestionIndex].status = "skipped"; assignments[selectedAssignmentId].questions[selectedQuestionIndex].mode = "Отложено"; renderAssignment(selectedAssignmentId); openQuestionList(); showToast("Вопрос отложен — к нему можно вернуться из списка"); });
+      document.querySelector("[data-save]").addEventListener("click", () => { assignments[selectedAssignmentId].questions[selectedQuestionIndex].status = "draft"; assignments[selectedAssignmentId].questions[selectedQuestionIndex].mode = "Черновик сохранён"; renderAssignment(selectedAssignmentId); showToast("Черновик сохранён"); });
+      document.querySelector("[data-submit-answer]").addEventListener("click", () => { assignments[selectedAssignmentId].questions[selectedQuestionIndex].status = "done"; assignments[selectedAssignmentId].questions[selectedQuestionIndex].mode = "Ответ готов"; renderAssignment(selectedAssignmentId); openQuestionList(); showToast("Ответ сохранён — выберите следующий вопрос"); });
+      document.querySelector("[data-voice]").addEventListener("click", (event) => { const button = event.currentTarget; const active = button.getAttribute("aria-pressed") !== "true"; button.setAttribute("aria-pressed", String(active)); button.querySelector("span").textContent = active ? "Остановить запись" : "Начать запись"; document.querySelector("#answer-state").textContent = active ? "Идёт запись · данные не отправляются" : "Запись остановлена · демонстрационный режим"; showToast(active ? "Запись началась" : "Запись остановлена"); });
+      document.querySelector("[data-replay]").addEventListener("click", (event) => { const button = event.currentTarget; const active = button.getAttribute("aria-pressed") !== "true"; button.setAttribute("aria-pressed", String(active)); button.querySelector("span").textContent = active ? "Остановить" : "Слушать · 1:08"; showToast(active ? "Воспроизведение ответа началось" : "Воспроизведение остановлено"); });
+      document.querySelector("[data-retry]").addEventListener("click", () => openQuestion(selectedQuestionIndex));
+
+      const importFragments = {
+        file: {name:"Лекция_распределённые_системы.pdf", meta:"6 страниц · текст извлечён", items:[
+          ["1","Титульная страница","Название курса и контакты преподавателя",false],["2","Гарантии доставки","At-most-once, at-least-once и причины повторной отправки",true],["3","Идемпотентность","Как event_id защищает состояние от повторной обработки",true],["4","Transactional outbox","Связь бизнес-транзакции, таблицы outbox и worker",true],["5","Обработка ошибок","Retry policy и dead-letter queue",true],["6","Порядок событий","Partition key и последовательность изменений одной сущности",true]
+        ]},
+        youtube: {name:"Надёжная доставка событий — YouTube", meta:"32:18 · курс «Архитектура сервисов» · русские субтитры", items:[
+          ["00:00","Вступление","План лекции и организационная часть",false],["03:12","Проблема dual write","Почему две независимые записи расходятся",true],["09:45","Паттерн outbox","Запись события вместе с изменением данных",true],["18:42","Повторная доставка","Retry и требования к consumer",true],["25:08","Защита от дублей","Хранение event_id обработанных событий",true]
+        ]},
+        text: {name:"Конспект лекции", meta:"4 смысловых раздела", items:[
+          ["1","Доставка сообщений","Основные гарантии брокера",true],["2","Повторная обработка","Идемпотентность и дедупликация",true],["3","Ошибки","Повторы, задержки и dead-letter queue",true],["4","Практический пример","Оформление заказа и публикация события",true]
+        ]}
+      };
+      let selectedSource = "file";
+      function setImportStage(stage) {
+        document.querySelectorAll("[data-import-step]").forEach((section) => { section.hidden = Number(section.dataset.importStep) !== stage; });
+        document.querySelectorAll("[data-import-progress]").forEach((item) => { const index = Number(item.dataset.importProgress); item.dataset.state = index < stage ? "done" : index === stage ? "current" : "upcoming"; });
+        if (stage === 4) updateCandidateReferences();
+        window.scrollTo({top:0, behavior:reducedMotion.matches ? "auto" : "smooth"});
+      }
+      function renderFragments(source) {
+        selectedSource = source;
+        const data = importFragments[source];
+        document.querySelector("#selected-source-name").textContent = data.name;
+        document.querySelector("#selected-source-meta").textContent = data.meta;
+        document.querySelector("#import-fragments").innerHTML = data.items.map((item, index) => `<label class="fragment-row"><input type="checkbox" ${item[3] ? "checked" : ""} /><span class="fragment-marker">${escapeHtml(item[0])}</span><span class="fragment-copy"><strong>${escapeHtml(item[1])}</strong><small>${escapeHtml(item[2])}</small></span></label>`).join("");
+      }
+      function updateCandidateReferences() {
+        const references = selectedSource === "youtube" ? ["18:42–21:10","09:45–12:30","25:08–27:40"] : selectedSource === "text" ? ["Раздел 2","Раздел 4","Раздел 3"] : ["Страницы 3–4","Страница 5","Страница 6"];
+        document.querySelectorAll("[data-source-reference]").forEach((element, index) => { element.textContent = references[index]; });
+      }
+      document.querySelectorAll("[data-source-tab]").forEach((button) => button.addEventListener("click", () => { selectedSource = button.dataset.sourceTab; document.querySelectorAll("[data-source-tab]").forEach((item) => item.setAttribute("aria-selected", String(item === button))); document.querySelectorAll("[data-source-panel]").forEach((panel) => { panel.hidden = panel.dataset.sourcePanel !== selectedSource; }); }));
+      document.querySelectorAll("[data-source-form]").forEach((form) => form.addEventListener("submit", (event) => { event.preventDefault(); if (form.dataset.sourceForm === "youtube") { document.querySelector("[data-youtube-preview]").hidden = false; showToast("Видео найдено — выберите язык субтитров"); return; } renderFragments(form.dataset.sourceForm); setImportStage(2); showToast("Содержание извлечено — выберите фрагменты"); }));
+      document.querySelectorAll("[data-file-picker] .file-input").forEach((input) => input.addEventListener("change", () => {
+        const picker = input.closest("[data-file-picker]");
+        const file = input.files && input.files[0];
+        picker.dataset.hasFile = String(Boolean(file));
+        picker.querySelector("[data-file-name]").textContent = file ? file.name : "Файл не выбран";
+        const triggerLabel = picker.querySelector("[data-file-trigger-label]");
+        if (file) triggerLabel.textContent = "Заменить файл";
+        else triggerLabel.textContent = input.id === "lecture-file" ? "Выбрать PDF/PPTX" : "Выбрать SRT/VTT/TXT";
+      }));
+      document.querySelector("[data-use-youtube]").addEventListener("click", () => { renderFragments("youtube"); setImportStage(2); showToast("Субтитры загружены — выберите фрагменты"); });
+      document.querySelectorAll("[data-import-go]").forEach((button) => button.addEventListener("click", () => setImportStage(Number(button.dataset.importGo))));
+      document.querySelector("[data-generation-form]").addEventListener("submit", (event) => { event.preventDefault(); const panel = document.querySelector("[data-processing]"); const button = document.querySelector("[data-generate-candidates]"); panel.hidden = false; button.disabled = true; document.querySelector("[data-processing-text]").textContent = "Извлекаем выбранные фрагменты → формируем вопросы → добавляем ссылки на источник"; setTimeout(() => { panel.hidden = true; button.disabled = false; setImportStage(4); }, reducedMotion.matches ? 120 : 900); });
+      document.querySelector("[data-manual-builder]").addEventListener("click", () => showToast("Ручной редактор останется соседней вкладкой конструктора"));
+      function updateAcceptedCount() { const candidates = [...document.querySelectorAll("[data-candidate]")]; const accepted = candidates.filter((item) => item.dataset.state === "accepted").length; document.querySelector("[data-accepted-count]").textContent = `Принято ${accepted} из ${candidates.length}`; document.querySelector("[data-add-candidates]").disabled = accepted === 0; }
+      document.querySelector("[data-candidate-list]").addEventListener("click", (event) => {
+        const candidate = event.target.closest("[data-candidate]"); if (!candidate) return;
+        if (event.target.closest("[data-candidate-accept]")) { candidate.dataset.state = candidate.dataset.state === "accepted" ? "" : "accepted"; event.target.textContent = candidate.dataset.state === "accepted" ? "Принят" : "Принять"; candidate.querySelector("[data-candidate-reject]").textContent = "Отклонить"; }
+        if (event.target.closest("[data-candidate-reject]")) { candidate.dataset.state = candidate.dataset.state === "rejected" ? "" : "rejected"; event.target.textContent = candidate.dataset.state === "rejected" ? "Вернуть" : "Отклонить"; candidate.querySelector("[data-candidate-accept]").textContent = "Принять"; }
+        if (event.target.closest("[data-candidate-edit]")) { const editor = candidate.querySelector(".candidate-editor"); editor.hidden = !editor.hidden; }
+        updateAcceptedCount();
+      });
+      document.querySelectorAll(".candidate-editor").forEach((form) => form.addEventListener("submit", (event) => { event.preventDefault(); const candidate = form.closest("[data-candidate]"); candidate.querySelector(".candidate-body strong").textContent = form.querySelector("textarea").value; form.hidden = true; showToast("Изменение сохранено"); }));
+      document.querySelector("[data-add-candidates]").addEventListener("click", () => showToast("Принятые вопросы добавлены в черновик задания"));
+
+      addEventListener("popstate", (event) => showScreen(event.state?.screen || location.hash.slice(1) || "overview", {push:false, focus:true}));
+      const initial = location.hash.slice(1);
+      if (initial && screens.some((screen) => screen.dataset.screen === initial)) showScreen(initial, {push:false});
+    </script>
+  </body>
+</html>

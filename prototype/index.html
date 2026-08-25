@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Статический UI/UX-прототип TuneAI" />
+    <title>TuneAI — прототип интерфейса</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=PT+Serif:wght@400;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #fffdf4;
+        --paper-strong: #ffffff;
+        --canvas: #f7f2e3;
+        --ink: #111111;
+        --muted: #66645d;
+        --line: #e3d9c1;
+        --yellow: #ffcc13;
+        --yellow-soft: #fff0a3;
+        --green: #147a39;
+        --red: #b42318;
+        --focus: rgba(255, 204, 19, 0.34);
+        --font-ui: "Golos Text", "Segoe UI", Arial, sans-serif;
+        --font-content: "PT Serif", Georgia, serif;
+        --content: 1180px;
+        --radius: 10px;
+        --shadow: 0 18px 46px rgba(40, 31, 8, 0.09);
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        min-width: 320px;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button, input { font: inherit; }
+      button, a[href] {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: rgba(255, 204, 19, 0.28);
+      }
+      button { cursor: pointer; }
+      button:active, a[href]:active { opacity: 0.72; }
+      a { color: inherit; }
+      :focus-visible {
+        outline: 3px solid var(--focus);
+        outline-offset: 3px;
+      }
+
+      .skip-link {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        z-index: 100;
+        min-height: 44px;
+        padding: 11px 14px;
+        background: var(--ink);
+        color: white;
+        transform: translateY(-160%);
+      }
+      .skip-link:focus { transform: translateY(0); }
+
+      .prototype-note {
+        min-height: 44px;
+        border-bottom: 1px solid var(--line);
+        background: var(--canvas);
+        color: var(--muted);
+        font: 500 11px/1.4 var(--font-ui);
+        letter-spacing: 0.025em;
+        text-align: center;
+        text-transform: uppercase;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
+      .prototype-note nav { display: flex; gap: 12px; }
+      .prototype-note a {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        color: var(--ink);
+        text-underline-offset: 3px;
+      }
+      .prototype-note a[aria-current="page"] { color: #765f00; text-decoration-thickness: 2px; }
+
+      .site-header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+        background: color-mix(in srgb, var(--paper) 92%, transparent);
+        backdrop-filter: blur(14px);
+      }
+      .header-inner {
+        width: min(calc(100% - 40px), var(--content));
+        min-height: 72px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 36px;
+      }
+      .brand {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 21px;
+        font-weight: 700;
+        text-decoration: none;
+        letter-spacing: -0.02em;
+      }
+      .brand-mark {
+        width: 18px;
+        height: 18px;
+        background: var(--yellow);
+        border: 2px solid var(--ink);
+        transform: rotate(-5deg);
+      }
+      .scenario-nav {
+        justify-self: center;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper-strong);
+      }
+      .scenario-nav button {
+        min-height: 44px;
+        border: 0;
+        border-radius: 5px;
+        padding: 0 14px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .scenario-nav button[aria-selected="true"] {
+        background: var(--yellow-soft);
+        color: var(--ink);
+      }
+
+      .button {
+        min-height: 46px;
+        border: 1px solid var(--ink);
+        border-radius: 8px;
+        padding: 0 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: var(--ink);
+        color: white;
+        font-weight: 600;
+        text-decoration: none;
+        transition: transform 160ms ease, background 160ms ease, color 160ms ease;
+      }
+      .button:hover { transform: translateY(-1px); }
+      .button-accent {
+        border-color: #d1a900;
+        background: var(--yellow);
+        color: var(--ink);
+      }
+      .button-secondary {
+        border-color: var(--line);
+        background: transparent;
+        color: var(--ink);
+      }
+      .button-text {
+        min-height: 44px;
+        border: 0;
+        padding: 0 4px;
+        background: transparent;
+        color: var(--ink);
+        font-weight: 700;
+        text-decoration: underline;
+        text-decoration-color: var(--line);
+        text-underline-offset: 5px;
+      }
+
+      main { overflow: hidden; }
+      .hero {
+        width: min(calc(100% - 40px), var(--content));
+        margin: 0 auto;
+        padding: clamp(58px, 8vw, 110px) 0 74px;
+        display: grid;
+        grid-template-columns: minmax(0, 0.86fr) minmax(460px, 1.14fr);
+        gap: clamp(42px, 7vw, 92px);
+        align-items: center;
+      }
+      .hero-copy { max-width: 560px; }
+      .overline {
+        margin: 0 0 18px;
+        color: #765f00;
+        font: 600 12px/1.4 var(--font-ui);
+        letter-spacing: 0.035em;
+        text-transform: uppercase;
+      }
+      h1 {
+        max-width: 640px;
+        margin: 0;
+        font-size: clamp(43px, 5.2vw, 68px);
+        font-weight: 600;
+        line-height: 1.04;
+        letter-spacing: -0.025em;
+        text-wrap: balance;
+      }
+      .hero-copy > p:not(.overline) {
+        max-width: 535px;
+        margin: 24px 0 0;
+        color: var(--muted);
+        font-size: clamp(17px, 1.6vw, 20px);
+        line-height: 1.56;
+      }
+      .hero-actions {
+        margin-top: 30px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
+      .trust-line {
+        margin: 34px 0 0;
+        max-width: 470px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .answer-stage {
+        position: relative;
+        min-width: 0;
+      }
+      .answer-stage::before {
+        content: "";
+        position: absolute;
+        inset: 18px -18px -18px 18px;
+        z-index: -1;
+        border: 1px solid #d9b100;
+        background: var(--yellow);
+      }
+      .answer-sheet {
+        border: 1px solid var(--ink);
+        border-radius: var(--radius);
+        background: var(--paper-strong);
+        box-shadow: var(--shadow);
+      }
+      .sheet-header {
+        min-height: 56px;
+        border-bottom: 1px solid var(--line);
+        padding: 0 18px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 16px;
+      }
+      .sheet-header strong { font-size: 14px; }
+      .sheet-question {
+        padding: 22px 22px 18px;
+      }
+      .sheet-question small,
+      .criterion-label,
+      .transcript-time {
+        color: var(--muted);
+        font: 500 11px/1.45 var(--font-ui);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.015em;
+        text-transform: uppercase;
+      }
+      .sheet-question h2 {
+        margin: 8px 0 0;
+        font-family: var(--font-content);
+        font-size: clamp(20px, 2.1vw, 28px);
+        line-height: 1.26;
+        letter-spacing: -0.01em;
+      }
+      .transcript {
+        position: relative;
+        margin: 0 22px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        padding: 18px 0 18px 60px;
+      }
+      .transcript-time {
+        position: absolute;
+        top: 21px;
+        left: 0;
+      }
+      .transcript p {
+        margin: 0;
+        font: 400 15px/1.65 var(--font-content);
+      }
+      .transcript mark {
+        padding: 1px 2px;
+        background: var(--yellow-soft);
+        color: inherit;
+      }
+      .score-row {
+        padding: 18px 22px 22px;
+        display: grid;
+        grid-template-columns: 96px 1fr;
+        gap: 20px;
+        align-items: start;
+      }
+      .score {
+        display: grid;
+        gap: 3px;
+      }
+      .score strong {
+        font-size: 36px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.025em;
+      }
+      .score small { color: var(--muted); font-size: 12px; }
+      .criteria { display: grid; gap: 10px; }
+      .criterion {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px 12px;
+        align-items: center;
+      }
+      .criterion-label { color: var(--ink); text-transform: none; }
+      .criterion b { font-size: 12px; }
+      .meter {
+        grid-column: 1 / -1;
+        height: 4px;
+        overflow: hidden;
+        background: var(--canvas);
+      }
+      .meter span { display: block; height: 100%; background: var(--ink); }
+      .record-control {
+        position: absolute;
+        right: -18px;
+        bottom: 34px;
+        width: 54px;
+        height: 54px;
+        border: 2px solid var(--ink);
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: var(--yellow);
+        color: var(--ink);
+        box-shadow: 0 5px 0 var(--ink);
+        transition: transform 160ms ease, box-shadow 160ms ease;
+      }
+      .record-control:hover { transform: translateY(-2px); }
+      .record-control[data-recording="true"] {
+        background: var(--ink);
+        color: white;
+        box-shadow: 0 5px 0 var(--yellow);
+      }
+
+      .process-section {
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: var(--canvas);
+      }
+      .section-inner {
+        width: min(calc(100% - 40px), var(--content));
+        margin: 0 auto;
+        padding: 72px 0;
+      }
+      .section-heading {
+        max-width: 720px;
+        margin-bottom: 42px;
+      }
+      .section-heading h2 {
+        margin: 0;
+        font-size: clamp(32px, 4.2vw, 50px);
+        font-weight: 600;
+        line-height: 1.1;
+        letter-spacing: -0.025em;
+      }
+      .section-heading p {
+        max-width: 600px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .process {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        border-top: 1px solid var(--ink);
+      }
+      .process article {
+        position: relative;
+        min-height: 184px;
+        padding: 22px 22px 8px 0;
+      }
+      .process article:not(:last-child) { border-right: 1px solid var(--line); }
+      .process article:not(:first-child) { padding-left: 22px; }
+      .process-number {
+        display: block;
+        margin-bottom: 34px;
+        color: #765f00;
+        font: 600 12px/1 var(--font-ui);
+        font-variant-numeric: tabular-nums;
+      }
+      .process h3 { margin: 0 0 8px; font-size: 18px; }
+      .process p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+
+      .result-section {
+        width: min(calc(100% - 40px), var(--content));
+        margin: 0 auto;
+        padding: 82px 0 92px;
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(460px, 1.2fr);
+        gap: 74px;
+        align-items: start;
+      }
+      .result-copy h2 {
+        margin: 0;
+        font-size: clamp(34px, 4.3vw, 54px);
+        font-weight: 600;
+        line-height: 1.08;
+        letter-spacing: -0.025em;
+      }
+      .result-copy p { color: var(--muted); line-height: 1.6; }
+      .result-list {
+        margin: 28px 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+      }
+      .result-list li {
+        border-top: 1px solid var(--line);
+        padding: 15px 0;
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+      .result-list svg { margin-top: 3px; color: var(--green); }
+      .feedback {
+        border-left: 4px solid var(--yellow);
+        padding: 8px 0 8px 28px;
+      }
+      .feedback blockquote {
+        margin: 0;
+        font-family: var(--font-content);
+        font-weight: 400;
+        font-size: clamp(22px, 2.8vw, 34px);
+        line-height: 1.4;
+        letter-spacing: -0.01em;
+      }
+      .feedback footer {
+        margin-top: 20px;
+        color: var(--muted);
+        font: 500 12px/1.5 var(--font-ui);
+      }
+
+      .site-footer {
+        border-top: 1px solid var(--line);
+      }
+      .footer-inner {
+        width: min(calc(100% - 40px), var(--content));
+        min-height: 96px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .footer-inner strong { color: var(--ink); }
+
+      dialog {
+        width: min(calc(100% - 32px), 460px);
+        border: 1px solid var(--ink);
+        border-radius: 12px;
+        padding: 0;
+        background: var(--paper);
+        color: var(--ink);
+        box-shadow: 0 24px 80px rgba(0,0,0,.25);
+      }
+      dialog::backdrop { background: rgba(17,17,17,.55); backdrop-filter: blur(3px); }
+      .dialog-head {
+        min-height: 64px;
+        border-bottom: 1px solid var(--line);
+        padding: 0 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .dialog-head h2 { margin: 0; font-size: 21px; }
+      .icon-button {
+        width: 44px;
+        height: 44px;
+        border: 0;
+        background: transparent;
+        font-size: 25px;
+      }
+      .login-form { padding: 22px; display: grid; gap: 16px; }
+      .field { display: grid; gap: 7px; }
+      .field label { font-size: 13px; font-weight: 600; }
+      .field input {
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 0 13px;
+        background: white;
+        color: var(--ink);
+      }
+      .field input:focus { border-color: var(--ink); }
+      .form-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .login-form .button { width: 100%; }
+
+      .toast {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        z-index: 50;
+        max-width: 340px;
+        border: 1px solid var(--ink);
+        border-radius: 8px;
+        padding: 13px 15px;
+        background: var(--ink);
+        color: white;
+        font-size: 13px;
+        box-shadow: var(--shadow);
+      }
+      .toast[hidden] { display: none; }
+
+      @media (max-width: 900px) {
+        .header-inner { gap: 18px; }
+        .hero {
+          grid-template-columns: 1fr;
+          padding-top: 64px;
+        }
+        .hero-copy { max-width: 680px; }
+        .answer-stage { width: min(100%, 680px); }
+        .result-section { grid-template-columns: 1fr; gap: 46px; }
+      }
+
+      @media (max-width: 680px) {
+        .prototype-note { justify-content: flex-start; text-align: left; }
+        .site-header { position: relative; }
+        .header-inner {
+          width: min(calc(100% - 28px), var(--content));
+          min-height: 0;
+          padding: 14px 0;
+          grid-template-columns: 1fr auto;
+          gap: 14px;
+        }
+        .scenario-nav {
+          grid-column: 1 / -1;
+          grid-row: 2;
+          justify-self: stretch;
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .scenario-nav button { min-width: 0; padding: 0 5px; font-size: 12px; }
+        .header-login { min-height: 44px; padding: 0 14px; }
+        .hero,
+        .section-inner,
+        .result-section,
+        .footer-inner { width: min(calc(100% - 28px), var(--content)); }
+        .hero { padding: 52px 0 60px; gap: 46px; }
+        h1 { font-size: clamp(39px, 12vw, 52px); }
+        .hero-copy > p:not(.overline) { font-size: 17px; }
+        .hero-actions { align-items: stretch; display: grid; gap: 10px; }
+        .button-text { justify-self: start; }
+        .trust-line { align-items: flex-start; }
+        .answer-stage::before { inset: 10px -8px -10px 8px; }
+        .sheet-header { padding: 0 14px; }
+        .sheet-question { padding: 18px 16px 15px; }
+        .transcript { margin: 0 16px; padding: 48px 0 16px; }
+        .transcript-time { top: 16px; }
+        .score-row { grid-template-columns: 1fr; padding: 16px; }
+        .score { grid-template-columns: auto 1fr; align-items: baseline; gap: 10px; }
+        .record-control { right: 12px; bottom: -26px; }
+        .section-inner { padding: 64px 0; }
+        .section-heading { margin-bottom: 30px; }
+        .process { grid-template-columns: 1fr; }
+        .process article { min-height: 0; padding: 18px 0 22px; border-right: 0 !important; }
+        .process article:not(:first-child) { border-top: 1px solid var(--line); padding-left: 0; }
+        .process-number { margin-bottom: 12px; }
+        .result-section { padding: 64px 0 72px; }
+        .feedback { padding-left: 20px; }
+        .footer-inner { min-height: 120px; align-items: flex-start; justify-content: center; flex-direction: column; gap: 8px; }
+        dialog { width: 100%; max-width: none; margin: auto 0 0; border-radius: 14px 14px 0 0; }
+        .toast { right: 14px; bottom: 14px; left: 14px; max-width: none; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">К содержанию</a>
+    <div class="prototype-note">
+      <span>Концепт интерфейса · production не изменён</span>
+      <nav aria-label="Экраны прототипа"><a href="index.html" aria-current="page">Лендинг</a><a href="dashboard.html">Кабинет</a></nav>
+    </div>
+
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="#main" aria-label="TuneAI, на главную">
+          <span class="brand-mark" aria-hidden="true"></span>
+          TuneAI
+        </a>
+
+        <nav class="scenario-nav" aria-label="Сценарий использования" role="tablist">
+          <button type="button" role="tab" aria-selected="true" data-scenario="study">Подготовка</button>
+          <button type="button" role="tab" aria-selected="false" data-scenario="exam">Экзамен</button>
+          <button type="button" role="tab" aria-selected="false" data-scenario="interview">Интервью</button>
+        </nav>
+
+        <button class="button button-accent header-login" type="button" data-open-login>Войти</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="overline" id="hero-overline">Подготовка к устному ответу</p>
+          <h1 id="hero-title">Ответь своими словами. Пойми, что улучшить.</h1>
+          <p id="hero-description">Запишите ответ — TuneAI сопоставит его с материалами курса и покажет, какие мысли раскрыты, а какие стоит уточнить.</p>
+          <div class="hero-actions">
+            <button class="button" type="button" data-record-trigger>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <span id="primary-label">Попробовать ответ</span>
+            </button>
+            <button class="button-text" type="button" data-open-login>У меня есть аккаунт</button>
+          </div>
+          <p class="trust-line">Спорные оценки остаются на проверке у преподавателя.</p>
+        </div>
+
+        <div class="answer-stage" id="answer-demo">
+          <article class="answer-sheet" aria-label="Пример разбора устного ответа">
+            <header class="sheet-header">
+              <strong id="sheet-mode">Тренировка · вопрос 2 из 5</strong>
+            </header>
+            <div class="sheet-question">
+              <small>Вопрос</small>
+              <h2 id="sheet-question">Почему transactional outbox помогает не терять события?</h2>
+            </div>
+            <div class="transcript">
+              <span class="transcript-time">00:18</span>
+              <p id="sheet-transcript">Событие записывается <mark>в одной транзакции</mark> с изменением данных. Затем worker отправляет его в очередь и может безопасно повторить попытку.</p>
+            </div>
+            <div class="score-row">
+              <div class="score">
+                <strong id="sheet-score">8,2</strong>
+                <small>из 10 баллов</small>
+              </div>
+              <div class="criteria" aria-label="Критерии оценки">
+                <div class="criterion">
+                  <span class="criterion-label">Смысл раскрыт</span><b>90%</b>
+                  <span class="meter" aria-hidden="true"><span style="width:90%"></span></span>
+                </div>
+                <div class="criterion">
+                  <span class="criterion-label">Опора на материалы</span><b>76%</b>
+                  <span class="meter" aria-hidden="true"><span style="width:76%"></span></span>
+                </div>
+                <div class="criterion">
+                  <span class="criterion-label">Полнота примера</span><b>64%</b>
+                  <span class="meter" aria-hidden="true"><span style="width:64%"></span></span>
+                </div>
+              </div>
+            </div>
+          </article>
+          <button class="record-control" type="button" aria-label="Начать запись ответа" aria-pressed="false" data-record-button data-recording="false">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="process-section" aria-labelledby="process-title">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="overline">Один понятный путь</p>
+            <h2 id="process-title">От вопроса до обратной связи — без технического шума.</h2>
+            <p>Технологии остаются внутри продукта. Пользователь видит только действия, прогресс и результат.</p>
+          </div>
+          <div class="process">
+            <article><span class="process-number">01 / вопрос</span><h3>Прочитайте задачу</h3><p>Вопрос и критерии доступны до начала записи.</p></article>
+            <article><span class="process-number">02 / ответ</span><h3>Ответьте голосом</h3><p>Запись можно остановить, прослушать и отправить.</p></article>
+            <article><span class="process-number">03 / проверка</span><h3>Дождитесь разбора</h3><p>Статус объясняет, что происходит и сколько это займёт.</p></article>
+            <article><span class="process-number">04 / результат</span><h3>Разберите ошибки</h3><p>Баллы связаны с критериями и фрагментами материалов.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="result-section" aria-labelledby="result-title">
+        <div class="result-copy">
+          <p class="overline">Результат, с которым можно работать</p>
+          <h2 id="result-title">Не просто балл — следующий шаг.</h2>
+          <p>Каждая оценка отвечает на три вопроса: что получилось, чего не хватило и что повторить перед следующей попыткой.</p>
+          <ul class="result-list">
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/></svg><span>Расшифровка ответа с отмеченными ключевыми тезисами</span></li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/></svg><span>Связь каждого вывода с критерием преподавателя</span></li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/></svg><span>Фрагменты материалов, которые стоит перечитать</span></li>
+          </ul>
+        </div>
+        <div class="feedback">
+          <blockquote>«Вы верно объяснили атомарность записи, но не показали, как идемпотентность защищает от повторной отправки».</blockquote>
+          <footer>Рекомендация · повторить раздел 4.2 «Доставка событий» · 3 минуты</footer>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner"><strong>TuneAI</strong><span>Понятная проверка устных ответов</span><span>Статический концепт · август 2026</span></div>
+    </footer>
+
+    <dialog id="login-dialog" aria-labelledby="login-title">
+      <div class="dialog-head">
+        <h2 id="login-title">Войти в TuneAI</h2>
+        <button class="icon-button" type="button" aria-label="Закрыть окно входа" data-close-login>×</button>
+      </div>
+      <form class="login-form" method="dialog" id="login-form">
+        <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" placeholder="name@example.com" required /></div>
+        <div class="field"><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required minlength="8" /></div>
+        <p class="form-note">Это прототип: форма не отправляет данные и не подключена к backend.</p>
+        <button class="button" type="submit">Продолжить</button>
+      </form>
+    </dialog>
+
+    <div class="toast" role="status" aria-live="polite" hidden id="toast"></div>
+
+    <script>
+      const scenarios = {
+        study: {
+          overline: "Подготовка к устному ответу",
+          title: "Ответь своими словами. Пойми, что улучшить.",
+          description: "Запишите ответ — TuneAI сопоставит его с материалами курса и покажет, какие мысли раскрыты, а какие стоит уточнить.",
+          primary: "Попробовать ответ",
+          mode: "Тренировка · вопрос 2 из 5",
+          question: "Почему transactional outbox помогает не терять события?",
+          transcript: "Событие записывается <mark>в одной транзакции</mark> с изменением данных. Затем worker отправляет его в очередь и может безопасно повторить попытку.",
+          score: "8,2"
+        },
+        exam: {
+          overline: "Устный экзамен",
+          title: "Проведи экзамен по единым критериям.",
+          description: "Вопросы открываются последовательно, ответы фиксируются, а спорные оценки остаются под контролем преподавателя.",
+          primary: "Посмотреть экзамен",
+          mode: "Экзамен · вопрос 3 из 7",
+          question: "Какие гарантии доставки предоставляет очередь сообщений?",
+          transcript: "Очередь обеспечивает <mark>как минимум однократную доставку</mark>, поэтому обработчик должен быть готов к повторному сообщению.",
+          score: "7,6"
+        },
+        interview: {
+          overline: "Структурированное интервью",
+          title: "Слушай ход мысли, а не ключевые слова.",
+          description: "Сохраните структуру интервью, сравните ответы по одной рубрике и получите аргументы для последующего обсуждения.",
+          primary: "Посмотреть интервью",
+          mode: "Интервью · вопрос 4 из 6",
+          question: "Как вы диагностируете потерю сообщений в распределённой системе?",
+          transcript: "Сначала проверю <mark>границы транзакций и метрики очереди</mark>, затем сопоставлю producer logs с consumer offsets.",
+          score: "8,7"
+        }
+      };
+
+      const dialog = document.querySelector("#login-dialog");
+      const toast = document.querySelector("#toast");
+      const recordButton = document.querySelector("[data-record-button]");
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.hidden = false;
+        window.clearTimeout(showToast.timer);
+        showToast.timer = window.setTimeout(() => { toast.hidden = true; }, 3200);
+      }
+
+      function setScenario(id) {
+        const item = scenarios[id];
+        if (!item) return;
+        document.querySelectorAll("[data-scenario]").forEach((button) => {
+          button.setAttribute("aria-selected", String(button.dataset.scenario === id));
+        });
+        document.querySelector("#hero-overline").textContent = item.overline;
+        document.querySelector("#hero-title").textContent = item.title;
+        document.querySelector("#hero-description").textContent = item.description;
+        document.querySelector("#primary-label").textContent = item.primary;
+        document.querySelector("#sheet-mode").textContent = item.mode;
+        document.querySelector("#sheet-question").textContent = item.question;
+        document.querySelector("#sheet-transcript").innerHTML = item.transcript;
+        document.querySelector("#sheet-score").textContent = item.score;
+      }
+
+      function toggleRecording() {
+        const active = recordButton.dataset.recording !== "true";
+        recordButton.dataset.recording = String(active);
+        recordButton.setAttribute("aria-pressed", String(active));
+        recordButton.setAttribute("aria-label", active ? "Остановить запись ответа" : "Начать запись ответа");
+        showToast(active ? "Запись началась — это демонстрационный режим" : "Запись остановлена — данные не сохранялись");
+      }
+
+      document.querySelectorAll("[data-scenario]").forEach((button) => button.addEventListener("click", () => setScenario(button.dataset.scenario)));
+      document.querySelectorAll("[data-open-login]").forEach((button) => button.addEventListener("click", () => dialog.showModal()));
+      document.querySelector("[data-close-login]").addEventListener("click", () => dialog.close());
+      document.querySelectorAll("[data-record-trigger]").forEach((button) => button.addEventListener("click", () => {
+        document.querySelector("#answer-demo").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+        toggleRecording();
+      }));
+      recordButton.addEventListener("click", toggleRecording);
+      document.querySelector("#login-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        dialog.close();
+        showToast("Форма проверена. Подключение к backend появится после согласования дизайна.");
+      });
+    </script>
+  </body>
+</html>
