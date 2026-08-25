@@ -13,7 +13,11 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
-        op.execute("ALTER TYPE answertypeenum ADD VALUE IF NOT EXISTS 'choice'")
+        # PostgreSQL cannot use a newly added enum value until the transaction
+        # that added it has committed.  This matters for fresh installations,
+        # where Alembic can apply the full migration chain in one transaction.
+        with op.get_context().autocommit_block():
+            op.execute("ALTER TYPE answertypeenum ADD VALUE IF NOT EXISTS 'choice'")
     inspector = sa.inspect(bind)
     question_columns = {column["name"] for column in inspector.get_columns("questions")}
     for name, column in (
