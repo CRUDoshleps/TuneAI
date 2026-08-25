@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.deps import get_current_user, require_roles
 from app.models import Assignment, RoleEnum, Test, User, UserInvite, utcnow
 from app.schemas import PasswordResetRead, UserBatchCreate, UserCreateAdmin, UserCreateStaff, UserInviteCreate, UserInviteRead, UserProvisionRead, UserRead, UserRoleUpdate
+from app.services.audit import record_audit
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -64,6 +65,8 @@ def create_user(
         created_by_id=None if current_user.role == RoleEnum.admin else current_user.id,
     )
     db.add(user)
+    db.flush()
+    record_audit(db, actor=current_user, action="user.create", entity_type="user", entity_id=user.id, details={"email": user.email, "role": user.role.value})
     db.commit()
     db.refresh(user)
     return user
@@ -151,6 +154,8 @@ def create_invite(
         expires_at=utcnow() + timedelta(days=payload.expires_in_days),
     )
     db.add(invite)
+    db.flush()
+    record_audit(db, actor=current_user, action="invite.create", entity_type="user_invite", entity_id=invite.id, details={"email": invite.email, "role": invite.role.value})
     db.commit()
     db.refresh(invite)
     return _serialize_invite(invite, token)
@@ -174,6 +179,7 @@ def reset_user_password(
     user.hashed_password = hash_password(password)
     user.must_change_password = True
     db.add(user)
+    record_audit(db, actor=current_user, action="user.password_reset", entity_type="user", entity_id=user.id)
     db.commit()
     db.refresh(user)
     return PasswordResetRead(user=UserRead.model_validate(user), temporary_password=password)
@@ -193,10 +199,12 @@ def update_user_role(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Admin cannot deactivate own account")
     if user.id == current_user.id and payload.role != RoleEnum.admin:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Admin cannot remove own admin role")
+    before = {"role": user.role.value, "is_active": user.is_active}
     user.role = payload.role
     if payload.is_active is not None:
         user.is_active = payload.is_active
     db.add(user)
+    record_audit(db, actor=current_user, action="user.update", entity_type="user", entity_id=user.id, details={"before": before, "after": {"role": user.role.value, "is_active": user.is_active}})
     db.commit()
     db.refresh(user)
     return user

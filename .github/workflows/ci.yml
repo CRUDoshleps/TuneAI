@@ -84,7 +84,7 @@ jobs:
               connection.execute(sa.text("DROP TABLE IF EXISTS ai_provider_configs CASCADE"))
           PY
           alembic upgrade head
-          test "$(alembic current | awk '{print $1}')" = "0016_moodle_production_hardening"
+          test "$(alembic current | awk '{print $1}')" = "0017_mixed_questions_import"
 
   frontend:
     name: Frontend tests, build and audit
@@ -154,6 +154,15 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.moodle.local.yml config >/tmp/tuneai-moodle-local-compose.yml
           docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/tmp/tuneai-prod-compose.yml
           docker compose -f deploy/compose.yaml config >/tmp/tuneai-deploy-compose.yml
+          docker compose --profile demo config --format json >/tmp/tuneai-compose.json
+          python - <<'PY'
+          import json
+
+          with open("/tmp/tuneai-compose.json", encoding="utf-8") as compose_file:
+              services = json.load(compose_file)["services"]
+          assert services["worker"]["depends_on"]["backend"]["condition"] == "service_healthy"
+          assert services["seed"]["depends_on"]["backend"]["condition"] == "service_healthy"
+          PY
 
   deployment-config:
     name: Production deployment config

@@ -8,9 +8,13 @@ import {
   Ban,
   BarChart3,
   CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Database,
   FileText,
+  GripVertical,
   HeartPulse,
   KeyRound,
   LogOut,
@@ -18,8 +22,11 @@ import {
   Mic,
   Play,
   Plus,
+  Presentation,
+  RefreshCw,
   Search,
   Shield,
+  SkipForward,
   Square,
   Trash2,
   Upload,
@@ -31,7 +38,6 @@ import {
   buildPlatformThemeVars,
   mergePlatformConfig,
   platformConfig as defaultPlatformConfig,
-  type DemoActionConfig,
   type DemoFlow,
   type DemoScenarioConfig,
   type PlatformConfig,
@@ -40,12 +46,14 @@ import {
 } from "../lib/platform-config";
 import {
   AdminAttempt,
+  AuditLog,
   AdminDashboard,
   AdminFailedJob,
   AIProviderConfig,
   AISkill,
   Answer,
   apiFetch,
+  apiDownload,
   Attempt,
   CalibrationPreviewResult,
   CompetencyMetric,
@@ -57,10 +65,13 @@ import {
   MaterialPolicy,
   PublicConfigResponse,
   QuestionAnswerMode,
+  Question,
+  QuestionType,
   QuestionGenerationResult,
   PasswordReset,
   ReviewQueueItem,
   SystemHealth,
+  SourceImport,
   Test,
   UserInvite,
   User
@@ -68,6 +79,10 @@ import {
 
 type TokenPair = { access_token: string; refresh_token: string };
 type SectionId = "overview" | "take" | "builder" | "materials" | "review" | "admin";
+
+function isSectionId(value: string | null): value is SectionId {
+  return value === "overview" || value === "take" || value === "builder" || value === "materials" || value === "review" || value === "admin";
+}
 
 const ROLE_LABELS: Record<User["role"], string> = {
   admin: "Администратор",
@@ -139,6 +154,31 @@ const QUESTION_ANSWER_MODE_LABELS: Record<QuestionAnswerMode, string> = {
   both: "Голос или текст"
 };
 
+const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  open_response: "Развёрнутый ответ",
+  single_choice: "Один вариант",
+  multiple_choice: "Несколько вариантов"
+};
+
+const LANDING_PROCESS = [
+  { title: "Прочитайте задачу", description: "Вопрос и критерии доступны до начала записи.", phase: "вопрос" },
+  { title: "Ответьте голосом", description: "Запись можно остановить, прослушать и отправить.", phase: "ответ" },
+  { title: "Дождитесь разбора", description: "Статус объясняет, что происходит с ответом.", phase: "проверка" },
+  { title: "Разберите ошибки", description: "Баллы связаны с критериями и материалами курса.", phase: "результат" }
+];
+
+const LANDING_BENEFITS = [
+  { title: "Критерии вместо магии", description: "Видно, за что начислены баллы и чего не хватило в ответе." },
+  { title: "Опора на материалы", description: "Рядом с замечанием можно открыть фрагмент конспекта или лекции." },
+  { title: "Контроль преподавателя", description: "Спорная оценка не становится итоговой без проверки человеком." }
+];
+
+const LANDING_AUDIENCES = [
+  { title: "Подготовка", description: "Студент тренируется в своём темпе, возвращается к вопросам и видит темы для повторения." },
+  { title: "Устный экзамен", description: "Преподаватель задаёт критерии и сохраняет контроль над спорными результатами." },
+  { title: "Интервью", description: "Кандидат репетирует структурный ответ и получает разбор ясности рассуждения." }
+];
+
 const DEFAULT_RUBRIC = "Оценить корректность, полноту, аргументацию и опору на материалы.";
 const DEFAULT_AGENT = "rubric-rag-reviewer";
 
@@ -160,6 +200,24 @@ function getCriteriaNumber(test: Test | null, key: string, fallback: number) {
 function questionAnswerModeFromForm(form: FormData): QuestionAnswerMode {
   const value = String(form.get("answer_mode") || "both");
   return value === "audio" || value === "text" || value === "both" ? value : "both";
+}
+
+function questionTypeFromForm(form: FormData): QuestionType {
+  const value = String(form.get("question_type") || "open_response");
+  return value === "single_choice" || value === "multiple_choice" ? value : "open_response";
+}
+
+function choiceFieldsFromForm(form: FormData, questionType: QuestionType) {
+  if (questionType === "open_response") {
+    return { options: [], correct_option_ids: [] as string[] };
+  }
+  const optionTexts = parseLines(String(form.get("options_text") || ""));
+  const correctIndexes = String(form.get("correct_options") || "1")
+    .split(",")
+    .map((item) => Number(item.trim()) - 1)
+    .filter((item) => Number.isInteger(item) && item >= 0 && item < optionTexts.length);
+  const options = optionTexts.map((text, index) => ({ id: `option-${index + 1}`, text }));
+  return { options, correct_option_ids: [...new Set(correctIndexes.map((index) => options[index].id))] };
 }
 
 function buildCriteriaFromForm(form: FormData) {
@@ -369,10 +427,20 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
   const [generatedQuestions, setGeneratedQuestions] = useState<GeneratedQuestionCandidate[]>([]);
   const [questionGenerationMeta, setQuestionGenerationMeta] = useState<QuestionGenerationResult | null>(null);
   const [calibrationPreview, setCalibrationPreview] = useState<CalibrationPreviewResult | null>(null);
-  const [activeSection, setActiveSection] = useState<SectionId>("overview");
-  const [status, setStatus] = useState<string>("Готово к работе");
+  const [sourceImports, setSourceImports] = useState<SourceImport[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [activeSection, setActiveSection] = useState<SectionId>(() => {
+    if (typeof window === "undefined") return "overview";
+    const value = new URLSearchParams(window.location.search).get("section");
+    return isSectionId(value) ? value : "overview";
+  });
+  const [, setStatus] = useState<string>("Готово к работе");
   const [error, setError] = useState<string>("");
   const [publicView, setPublicView] = useState<PublicView>("home");
+  const openPublicView = (view: PublicView) => {
+    setPublicView(view);
+    window.scrollTo({ top: 0, left: 0 });
+  };
   const [demoScenarioId, setDemoScenarioId] = useState<string>(defaultPlatformConfig.demoScenarios[0]?.id || "self-training");
   const [widgetTestId] = useState<string>(() => {
     if (typeof window === "undefined") {
@@ -385,6 +453,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
   const loadAttemptHistoryRef = useRef<(activeToken?: string, availableTests?: Test[]) => Promise<void>>(async () => undefined);
   const loadCompetenciesRef = useRef<(activeToken?: string) => Promise<void>>(async () => undefined);
   const loadMaterialsRef = useRef<(testId: string, activeToken?: string) => Promise<void>>(async () => undefined);
+  const loadSourceImportsRef = useRef<(testId: string, activeToken?: string) => Promise<SourceImport[]>>(async () => []);
 
   useEffect(() => {
     apiFetch<PublicConfigResponse>("/public/config")
@@ -393,6 +462,25 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (appMode !== "full") return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", activeSection);
+    if (selectedTest?.id) url.searchParams.set("test", selectedTest.id);
+    else url.searchParams.delete("test");
+    window.history.replaceState({}, "", url);
+  }, [activeSection, appMode, selectedTest]);
+
+  useEffect(() => {
+    if (appMode !== "full") return;
+    const onPopState = () => {
+      const value = new URLSearchParams(window.location.search).get("section");
+      if (isSectionId(value)) setActiveSection(value);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [appMode]);
 
   useEffect(() => {
     const savedToken = localStorage.getItem("tuneai_access") || "";
@@ -424,6 +512,14 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     return () => window.clearInterval(timer);
   }, [attempt, token]);
 
+  useEffect(() => {
+    if (!token || !sourceImports.some((item) => item.status === "queued" || item.status === "generating")) return;
+    const timer = window.setInterval(() => {
+      if (selectedTest?.id) loadSourceImportsRef.current(selectedTest.id).catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [sourceImports, selectedTest, token]);
+
   const currentRole = user?.role as PlatformRole | undefined;
   const canCreateTests = Boolean(currentRole && activePlatformConfig.permissions.testCreatorRoles.includes(currentRole));
   const canReviewAnswers = Boolean(currentRole && activePlatformConfig.permissions.answerReviewerRoles.includes(currentRole));
@@ -436,16 +532,16 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
   const isWidget = appMode === "widget";
   const widgetTests = widgetTestId ? takableTests.filter((test) => test.id === widgetTestId) : takableTests;
   const activeTitle = {
-    overview: "Рабочий стол",
-    take: "Прохождение",
+    overview: "Сегодня",
+    take: "Задания",
     builder: "Конструктор тестов",
     materials: "Настройка теста",
     review: "Проверка ответов",
     admin: "Администрирование"
   }[activeSection];
   const activeSubtitle = {
-    overview: "Следующий шаг зависит от роли и доступных тестов.",
-    take: "Выберите доступный тест и проходите вопросы по порядку.",
+    overview: "Продолжите текущее задание или выберите следующее.",
+    take: "Откройте задание, выберите вопрос и отвечайте в удобном порядке.",
     builder: "Создавайте сценарии, вопросы и критерии проверки.",
     materials: "Добавляйте учебные материалы, связывайте их с вопросами и назначайте участников.",
     review: "Подтвердите или скорректируйте спорные оценки AI.",
@@ -455,6 +551,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
   useEffect(() => {
     if (selectedTestId && canManageSelectedTest && token) {
       loadMaterialsRef.current(selectedTestId).catch(() => setMaterials([]));
+      loadSourceImportsRef.current(selectedTestId).catch(() => setSourceImports([]));
     }
   }, [selectedTestId, canManageSelectedTest, token]);
 
@@ -491,7 +588,8 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     const items = await apiFetch<Test[]>("/tests", {}, activeToken);
     setTests(items);
     if (!selectedTest && items.length) {
-      setSelectedTest(items[0]);
+      const requestedId = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("test");
+      setSelectedTest(items.find((item) => item.id === requestedId) || items[0]);
     }
     return items;
   }
@@ -516,6 +614,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     const health = await apiFetch<SystemHealth>("/admin/system", {}, activeToken);
     const providers = await apiFetch<AIProviderConfig[]>("/admin/ai-providers", {}, activeToken);
     const groups = await apiFetch<Group[]>("/groups", {}, activeToken);
+    const audit = await apiFetch<AuditLog[]>("/admin/audit-log?limit=100", {}, activeToken);
     setAdminDashboard(dashboard);
     setAdminUsers(users);
     setAdminAttempts(attempts);
@@ -523,6 +622,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     setSystemHealth(health);
     setAiProviders(providers);
     setAdminGroups(groups);
+    setAuditLogs(audit);
   }
 
   async function loadGroups(activeToken = token) {
@@ -530,6 +630,13 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     setAdminGroups(groups);
     return groups;
   }
+
+  async function loadSourceImports(testId: string, activeToken = token) {
+    const items = await apiFetch<SourceImport[]>(`/source-imports?test_id=${encodeURIComponent(testId)}`, {}, activeToken);
+    setSourceImports(items);
+    return items;
+  }
+  loadSourceImportsRef.current = loadSourceImports;
 
   async function loadReviewQueue(activeToken = token) {
     const items = await apiFetch<ReviewQueueItem[]>("/attempts/review-queue", {}, activeToken);
@@ -743,17 +850,13 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
         },
         token
       );
-      const published = await apiFetch<Test>(`/tests/${test.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "published" })
-      }, token);
       await loadTests();
       if (user?.role === "admin") {
         await loadAdmin();
       }
-      setSelectedTest(published);
+      setSelectedTest(test);
       setActiveSection("builder");
-      setStatus("Тест создан и опубликован");
+      setStatus("Черновик создан — добавьте вопросы и опубликуйте после проверки");
       formElement.reset();
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось создать тест."));
@@ -799,6 +902,8 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     setError("");
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
+    const questionType = questionTypeFromForm(form);
+    const choiceFields = choiceFieldsFromForm(form, questionType);
     try {
       await apiFetch(
         `/tests/${selectedTest.id}/questions`,
@@ -807,6 +912,9 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
           body: JSON.stringify({
             text: String(form.get("text")),
             expected_answer: String(form.get("expected_answer") || ""),
+            question_type: questionType,
+            ...choiceFields,
+            explanation: String(form.get("explanation") || ""),
             competencies: parseCompetencies(String(form.get("competencies") || "")),
             answer_mode: questionAnswerModeFromForm(form),
             order_index: selectedTest.question_count,
@@ -820,6 +928,139 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       setSelectedTest(updated);
       setStatus("Вопрос добавлен");
       formElement.reset();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось добавить вопрос."));
+    }
+  }
+
+  async function updateQuestion(question: Question, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTest) return;
+    const form = new FormData(event.currentTarget);
+    const questionType = questionTypeFromForm(form);
+    const choiceFields = choiceFieldsFromForm(form, questionType);
+    try {
+      await apiFetch(`/tests/${selectedTest.id}/questions/${question.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          text: String(form.get("text") || ""),
+          expected_answer: String(form.get("expected_answer") || ""),
+          question_type: questionType,
+          ...choiceFields,
+          explanation: String(form.get("explanation") || ""),
+          competencies: parseCompetencies(String(form.get("competencies") || "")),
+          answer_mode: questionType === "open_response" ? questionAnswerModeFromForm(form) : "text",
+          max_score: Number(form.get("max_score") || 10)
+        })
+      }, token);
+      const updated = await apiFetch<Test>(`/tests/${selectedTest.id}`, {}, token);
+      setSelectedTest(updated);
+      await loadTests();
+      setStatus("Вопрос сохранён");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось сохранить вопрос."));
+    }
+  }
+
+  async function deleteQuestion(question: Question) {
+    if (!selectedTest) return;
+    try {
+      await apiFetch(`/tests/${selectedTest.id}/questions/${question.id}`, { method: "DELETE" }, token);
+      const updated = await apiFetch<Test>(`/tests/${selectedTest.id}`, {}, token);
+      setSelectedTest(updated);
+      await loadTests();
+      setStatus("Вопрос удалён");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось удалить вопрос."));
+    }
+  }
+
+  async function duplicateQuestion(question: Question) {
+    if (!selectedTest) return;
+    try {
+      await apiFetch(`/tests/${selectedTest.id}/questions`, {
+        method: "POST",
+        body: JSON.stringify({ ...question, id: undefined, text: `${question.text} — копия`, order_index: selectedTest.questions.length })
+      }, token);
+      const updated = await apiFetch<Test>(`/tests/${selectedTest.id}`, {}, token);
+      setSelectedTest(updated);
+      await loadTests();
+      setStatus("Копия вопроса создана");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось дублировать вопрос."));
+    }
+  }
+
+  async function moveQuestion(questionId: string, direction: -1 | 1) {
+    if (!selectedTest) return;
+    const ids = selectedTest.questions.map((item) => item.id);
+    const index = ids.indexOf(questionId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= ids.length) return;
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    try {
+      const updated = await apiFetch<Test>(`/tests/${selectedTest.id}/questions/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ question_ids: ids })
+      }, token);
+      setSelectedTest(updated);
+      await loadTests();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось изменить порядок вопросов."));
+    }
+  }
+
+  async function uploadPresentation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTest) return;
+    const formElement = event.currentTarget;
+    const file = new FormData(formElement).get("presentation");
+    if (!(file instanceof File) || !file.size) {
+      setError("Выберите презентацию PPTX или PDF.");
+      return;
+    }
+    const payload = new FormData();
+    payload.append("file", file);
+    try {
+      await apiFetch<SourceImport>(`/source-imports/upload?test_id=${selectedTest.id}`, { method: "POST", body: payload }, token);
+      await loadSourceImports(selectedTest.id);
+      setStatus("Презентация разобрана — выберите слайды для генерации");
+      formElement.reset();
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось загрузить презентацию."));
+    }
+  }
+
+  async function generateFromPresentation(source: SourceImport, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const excluded = source.segments.filter((segment) => form.get(`segment-${segment.id}`) !== "on").map((segment) => segment.id);
+    const questionTypes = form.getAll("question_types").map(String);
+    try {
+      await apiFetch<SourceImport>(`/source-imports/${source.id}/generate`, {
+        method: "POST",
+        body: JSON.stringify({
+          count: Number(form.get("count") || 8),
+          difficulty: String(form.get("difficulty") || "balanced"),
+          language: "ru",
+          question_types: questionTypes.length ? questionTypes : ["open_response"],
+          excluded_segment_ids: excluded
+        })
+      }, token);
+      await loadSourceImports(source.test_id);
+      setStatus("Генерация поставлена в очередь");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось запустить генерацию."));
+    }
+  }
+
+  async function acceptPresentationCandidate(source: SourceImport, candidateId: string) {
+    try {
+      await apiFetch(`/source-imports/${source.id}/candidates/${candidateId}/accept`, { method: "POST" }, token);
+      const updated = await apiFetch<Test>(`/tests/${source.test_id}`, {}, token);
+      setSelectedTest(updated);
+      await Promise.all([loadTests(), loadSourceImports(source.test_id)]);
+      setStatus("Вопрос добавлен в черновик");
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось добавить вопрос."));
     }
@@ -956,6 +1197,11 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
           body: JSON.stringify({
             text: candidate.text,
             expected_answer: candidate.expected_answer,
+            question_type: candidate.question_type || "open_response",
+            options: candidate.options || [],
+            correct_option_ids: candidate.correct_option_ids || [],
+            explanation: candidate.explanation || "",
+            source_refs: candidate.source_refs || [],
             competencies: candidate.competencies,
             answer_mode: candidate.answer_mode,
             order_index: selectedTest.question_count,
@@ -1107,6 +1353,18 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       setStatus("Участник добавлен в группу");
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось добавить участника в группу."));
+    }
+  }
+
+  async function removeGroupMember(group: Group, userId: string) {
+    setError("");
+    try {
+      await apiFetch<Group>(`/groups/${group.id}/members/${userId}`, { method: "DELETE" }, token);
+      await loadGroups();
+      if (user?.role === "admin") await loadAdmin();
+      setStatus("Участник удалён из группы");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось удалить участника из группы."));
     }
   }
 
@@ -1521,6 +1779,49 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     }
   }
 
+  async function uploadChoiceAnswer(questionId: string, selectedOptionIds: string[]) {
+    if (!attempt) return;
+    setError("");
+    try {
+      const nextAttempt = await apiFetch<Attempt>(`/attempts/${attempt.id}/questions/${questionId}/choices`, {
+        method: "POST",
+        headers: { "Idempotency-Key": newIdempotencyKey("choice") },
+        body: JSON.stringify({ selected_option_ids: selectedOptionIds })
+      }, token);
+      setAttempt(nextAttempt);
+      setStatus("Ответ сохранён");
+    } catch (err) {
+      const message = getUserErrorMessage(err, "Не удалось сохранить выбранный ответ.");
+      setError(message);
+      throw new Error(message);
+    }
+  }
+
+  async function retryFailedJob(job: AdminFailedJob) {
+    try {
+      await apiFetch(`/admin/failed-jobs/${job.id}/retry`, { method: "POST" }, token);
+      await loadAdmin();
+      setStatus("Задача поставлена на повторную обработку");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось повторить задачу."));
+    }
+  }
+
+  async function exportResults() {
+    try {
+      const blob = await apiDownload("/admin/results/export.csv", token);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "tuneai-results.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+      setStatus("Экспорт результатов готов");
+    } catch (err) {
+      setError(getUserErrorMessage(err, "Не удалось выгрузить результаты."));
+    }
+  }
+
   async function reviewAnswer(
     item: ReviewQueueItem,
     event: FormEvent<HTMLFormElement>
@@ -1623,6 +1924,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                   onStart={() => startAttempt(visibleWidgetTest)}
                   onUpload={uploadRecording}
                   onTextSubmit={uploadTextAnswer}
+                  onChoiceSubmit={uploadChoiceAnswer}
                   onError={setError}
                 />
               ) : (
@@ -1659,75 +1961,104 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                   className={publicView === view ? "active" : ""}
                   aria-pressed={publicView === view}
                   key={view}
-                  onClick={() => setPublicView(view as PublicView)}
+                  onClick={() => openPublicView(view as PublicView)}
                 >
                   {label}
                 </button>
               ))}
             </nav>
-            <a className="nav-pill" href={consultationHref}>
-              {activePlatformConfig.template === "official" ? "Консультация" : "Контакт"}
-            </a>
+            <button className="nav-pill" type="button" onClick={() => openPublicView("demo")}>Войти</button>
           </header>
 
           {publicView === "home" ? (
             <section className="public-home">
               <section className="landing-hero home-hero">
                 <div className="hero-copy">
-                  <div className="eyebrow">Платформа устных проверок</div>
-                  <h1>{activePlatformConfig.headline}</h1>
-                  <p>{activePlatformConfig.problemDescription}</p>
+                  <p className="landing-overline">Подготовка к устному ответу</p>
+                  <h1>Ответьте своими словами. <span>Поймите, что улучшить.</span></h1>
+                  <p>Запишите ответ — {activePlatformConfig.productName} сопоставит его с материалами курса и покажет, какие мысли раскрыты, а какие стоит уточнить.</p>
                   <div className="hero-actions">
-                    <button className="primary" onClick={() => setPublicView("demo")}>
-                      Открыть демонстрацию
+                    <button className="primary" onClick={() => openPublicView("demo")}>
+                      <Mic size={17} /> Попробовать ответ
                     </button>
-                    <a className="secondary" href={activePlatformConfig.repositoryUrl} target="_blank" rel="noreferrer">
-                      GitHub
-                    </a>
+                    <button className="landing-text-action" type="button" onClick={() => openPublicView("demo")}>У меня есть аккаунт</button>
                   </div>
+                  <p className="landing-trust"><Shield size={16} /> Спорные оценки остаются на проверке у преподавателя.</p>
                 </div>
 
-                <section className="product-preview" aria-label="Превью интерфейса">
-                  <div className="preview-top">
-                    <span>Устный экзамен</span>
-                    <strong>82%</strong>
-                  </div>
-                  <div className="preview-question">Как outbox помогает не терять события?</div>
-                  <div className="preview-wave" aria-hidden="true">
-                    <span /><span /><span /><span /><span /><span />
-                  </div>
-                  <div className="preview-feedback">
-                    <strong>Обратная связь</strong>
-                    <p>Ответ точный, но не хватает примера повторной обработки и идемпотентности.</p>
-                  </div>
-                </section>
+                <div className="answer-stage">
+                  <section className="answer-sheet" aria-label="Пример разбора устного ответа">
+                    <header className="answer-sheet-head"><strong>Тренировка · вопрос 2 из 5</strong></header>
+                    <div className="answer-sheet-question">
+                      <span>Вопрос</span>
+                      <h2>Почему transactional outbox помогает не терять события?</h2>
+                    </div>
+                    <div className="answer-transcript">
+                      <span>00:18</span>
+                      <p>Событие записывается <mark>в одной транзакции</mark> с изменением данных. Затем worker отправляет его в очередь и может безопасно повторить попытку.</p>
+                    </div>
+                    <div className="answer-score-row">
+                      <div className="answer-score"><strong>8,2</strong><small>из 10 баллов</small></div>
+                      <div className="answer-criteria" aria-label="Критерии оценки">
+                        {[['Смысл раскрыт', 90], ['Опора на материалы', 76], ['Полнота примера', 64]].map(([label, score]) => (
+                          <div className="answer-criterion" key={String(label)}>
+                            <span>{label}</span><b>{score}%</b>
+                            <i aria-hidden="true"><i style={{ width: `${score}%` }} /></i>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+                  <span className="answer-record-mark" aria-hidden="true"><Mic size={21} /></span>
+                </div>
               </section>
 
-              <section className="problem-band">
+              <section className="landing-process" aria-labelledby="landing-process-title">
+                <header>
+                  <p className="landing-overline">Один понятный путь</p>
+                  <h2 id="landing-process-title">От вопроса до обратной связи — без технического шума.</h2>
+                  <p>Технологии остаются внутри продукта. Пользователь видит только действие, прогресс и результат.</p>
+                </header>
                 <div>
-                  <span>Проблема</span>
-                  <strong>{activePlatformConfig.problemTitle}</strong>
+                  {LANDING_PROCESS.map((item, index) => (
+                    <article key={item.title}>
+                      <span>{String(index + 1).padStart(2, "0")} / {item.phase}</span>
+                      <h3>{item.title}</h3>
+                      <p>{item.description}</p>
+                    </article>
+                  ))}
                 </div>
-                <p>{activePlatformConfig.subheadline}</p>
               </section>
 
-              <section className="audience-grid" aria-label="Для кого полезен TuneAI">
-                {activePlatformConfig.audienceCards.map((card) => (
-                  <div key={card.title}>
-                    <strong>{card.title}</strong>
-                    <p>{card.description}</p>
-                  </div>
-                ))}
+              <section className="landing-result" aria-labelledby="landing-result-title">
+                <div>
+                  <p className="landing-overline">После ответа</p>
+                  <h2 id="landing-result-title">Не просто балл, а понятный следующий шаг.</h2>
+                  <p>Каждое замечание связано с критерием, фрагментом ответа и материалом курса — поэтому результат можно проверить и использовать для следующей попытки.</p>
+                  <ul>
+                    {LANDING_BENEFITS.map((item) => (
+                      <li key={item.title}><CheckCircle2 size={18} /><span><strong>{item.title}</strong><small>{item.description}</small></span></li>
+                    ))}
+                  </ul>
+                </div>
+                <blockquote>
+                  «Ответ точный, но не хватает примера повторной обработки и объяснения идемпотентности consumer».
+                  <footer>Фрагмент обратной связи · архитектура сервисов</footer>
+                </blockquote>
               </section>
 
-              <section className="value-grid" aria-label="Почему стоит попробовать">
-                {activePlatformConfig.valueProps.map((item) => (
-                  <div key={item.title}>
-                    <CheckCircle2 size={20} />
-                    <strong>{item.title}</strong>
-                    <p>{item.description}</p>
-                  </div>
-                ))}
+              <section className="landing-audiences" aria-labelledby="landing-audiences-title">
+                <header><p className="landing-overline">Три режима</p><h2 id="landing-audiences-title">Один принцип — разные учебные ситуации.</h2></header>
+                <div>
+                  {LANDING_AUDIENCES.map((card, index) => (
+                    <article key={card.title}><span>{String(index + 1).padStart(2, "0")}</span><h3>{card.title}</h3><p>{card.description}</p></article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="landing-final-cta">
+                <div><p className="landing-overline">Посмотрите изнутри</p><h2>Попробуйте один ответ — дальше интерфейс объяснит сам.</h2></div>
+                <div><button className="primary" type="button" onClick={() => openPublicView("demo")}>Открыть демонстрацию <ChevronRight size={17} /></button><a href={consultationHref}>Обсудить внедрение</a></div>
               </section>
             </section>
           ) : (
@@ -1793,9 +2124,9 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                     <p className="muted">Контур для студентов, экзаменуемых и кандидатов. Администраторы входят отдельно.</p>
                   )}
                   <form onSubmit={handleAuth} className="stack">
-                    {mode === "register" && <input name="full_name" placeholder="Имя и фамилия" required minLength={2} />}
-                    <input name="email" type="email" placeholder="Email" required />
-                    <input name="password" type="password" placeholder="Пароль" required minLength={8} />
+                    {mode === "register" && <label className="auth-field">Имя и фамилия<input name="full_name" autoComplete="name" required minLength={2} /></label>}
+                    <label className="auth-field">Email<input name="email" type="email" autoComplete="email" required /></label>
+                    <label className="auth-field">Пароль<input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} /></label>
                     <button className="primary" type="submit"><UserRound size={18} /> Продолжить</button>
                   </form>
                   <div className="test-account">
@@ -1808,52 +2139,6 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
               </section>
             </section>
           )}
-
-          <section className="ai-pipeline" aria-label={`Как работает ${activePlatformConfig.productName}`}>
-            {activePlatformConfig.pipeline.map((item) => (
-              <div key={`${item.step}-${item.title}`}>
-                <span>{item.step}</span>
-                <strong>{item.title}</strong>
-                <small>{item.description}</small>
-              </div>
-            ))}
-          </section>
-
-          <section className="demo-console" aria-label={`Быстрые действия ${activePlatformConfig.productName}`}>
-            {activePlatformConfig.demoActions.map((action) => (
-              <DemoActionButton
-                key={action.id}
-                action={action}
-                config={activePlatformConfig}
-                onStartDemo={startDemoFlow}
-              />
-            ))}
-          </section>
-
-          <section className="consultation-panel" aria-label="Заявка на консультацию">
-            <div>
-              <strong>{activePlatformConfig.template === "official" ? "Нужна консультация по внедрению?" : "Нужна помощь с настройкой?"}</strong>
-              <p>Если есть сложности, вопросы или пожелания по развертыванию, напишите на почту. Ответственный: {activePlatformConfig.consultationPerson}.</p>
-            </div>
-            <a className="primary" href={consultationHref}>{activePlatformConfig.consultationEmail}</a>
-          </section>
-
-          <section className="self-host-panel" aria-label="Self-host настройки">
-            <div>
-              <strong>{activePlatformConfig.headline}</strong>
-              <p>{activePlatformConfig.subheadline}</p>
-            </div>
-            <code>{activePlatformConfig.deploymentCommand}</code>
-            <div className="module-list">
-              {activePlatformConfig.enabledModules.map((module) => (
-                <span key={module}>{module}</span>
-              ))}
-            </div>
-            <div className="self-host-links">
-              <small>Настраивается через: {activePlatformConfig.environmentCommand}</small>
-              <a href={activePlatformConfig.docsUrl} target="_blank" rel="noreferrer">Документация</a>
-            </div>
-          </section>
 
           <footer className="site-footer">
             <div>
@@ -1868,8 +2153,6 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
               ))}
             </nav>
           </footer>
-
-          <div className="brand-wordmark" aria-hidden="true">{activePlatformConfig.logoText.toLowerCase()}</div>
         </section>
       </main>
     );
@@ -1901,6 +2184,9 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     ...(canReviewAnswers ? [{ id: "review" as SectionId, label: "Проверка", icon: <CheckCircle2 size={17} /> }] : []),
     ...(user.role === "admin" ? [{ id: "admin" as SectionId, label: "Админка", icon: <Shield size={17} /> }] : [])
   ];
+  const mobileNavigation = navigation.length <= 5
+    ? navigation
+    : [...navigation.slice(0, 4), navigation[navigation.length - 1]];
 
   return (
     <main className="app-shell" style={themeVars}>
@@ -1980,8 +2266,6 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
             attempt={attempt}
             attemptHistory={attemptHistory}
             competencyMetrics={competencyMetrics}
-            status={status}
-            roleMatrix={activePlatformConfig.roleMatrix}
             onOpen={setActiveSection}
           />
         )}
@@ -2004,12 +2288,14 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
               <section className="panel flow-main">
                 {selectedTest ? (
                   <TestRunner
+                    key={selectedTest.id}
                     test={selectedTest}
                     attempt={attempt?.test_id === selectedTest.id ? attempt : null}
                     answers={attempt?.test_id === selectedTest.id ? attempt.answers : []}
                     onStart={() => startAttempt(selectedTest)}
                     onUpload={uploadRecording}
                     onTextSubmit={uploadTextAnswer}
+                    onChoiceSubmit={uploadChoiceAnswer}
                     onError={setError}
                   />
                 ) : (
@@ -2049,6 +2335,14 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
             onCreateTest={createTest}
             onUpdateTest={updateTestSettings}
             onAddQuestion={addQuestion}
+            onUpdateQuestion={updateQuestion}
+            onDeleteQuestion={deleteQuestion}
+            onDuplicateQuestion={duplicateQuestion}
+            onMoveQuestion={moveQuestion}
+            sourceImports={sourceImports}
+            onUploadPresentation={uploadPresentation}
+            onGenerateFromPresentation={generateFromPresentation}
+            onAcceptPresentationCandidate={acceptPresentationCandidate}
             onCreateSkill={createAISkill}
             onUploadSkill={uploadAISkill}
             onUpdateSkill={updateAISkill}
@@ -2102,6 +2396,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
             systemHealth={systemHealth}
             aiProviders={aiProviders}
             groups={adminGroups}
+            auditLogs={auditLogs}
             materials={adminMaterials}
             materialTestId={adminMaterialTestId}
             lastInvite={lastInvite}
@@ -2113,6 +2408,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
             onResetPassword={resetAdminPassword}
             onCreateGroup={createGroup}
             onAddGroupMember={addGroupMember}
+            onRemoveGroupMember={removeGroupMember}
             onUpdateUser={updateAdminUser}
             onUpdateTestStatus={updateAdminTestStatus}
             onDeleteTest={deleteAdminTest}
@@ -2122,9 +2418,26 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
             onUpdateAIProvider={updateAIProvider}
             onActivateAIProvider={activateAIProvider}
             onDeleteAIProvider={deleteAIProvider}
+            onRetryFailedJob={retryFailedJob}
+            onExportResults={exportResults}
           />
         )}
       </section>
+
+      <nav className="mobile-nav" aria-label="Основная навигация">
+        {mobileNavigation.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            className={activeSection === item.id ? "active" : ""}
+            aria-current={activeSection === item.id ? "page" : undefined}
+            onClick={() => setActiveSection(item.id)}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
     </main>
   );
 }
@@ -2137,8 +2450,6 @@ function JourneyOverview({
   attempt,
   attemptHistory,
   competencyMetrics,
-  status,
-  roleMatrix,
   onOpen
 }: {
   user: User;
@@ -2148,28 +2459,14 @@ function JourneyOverview({
   attempt: Attempt | null;
   attemptHistory: Attempt[];
   competencyMetrics: CompetencyMetric[];
-  status: string;
-  roleMatrix: PlatformConfig["roleMatrix"];
   onOpen: (section: SectionId) => void;
 }) {
-  const route =
-    user.role === "examinee"
-      ? [
-          ["1", "Открыть экзамен", "take"],
-          ["2", "Ответить голосом", "take"],
-          ["3", "Получить результат", "take"]
-        ]
-      : user.role === "student"
-        ? [
-            ["1", "Создать тренировку", "builder"],
-            ["2", "Добавить материалы", "materials"],
-            ["3", "Пройти попытку", "take"]
-          ]
-        : [
-            ["1", "Собрать тест", "builder"],
-            ["2", "Настроить материалы", "materials"],
-            ["3", user.role === "admin" ? "Проверить мониторинг" : "Проверить ответы", user.role === "admin" ? "admin" : "review"]
-  ];
+  const currentTest = tests.find((test) => test.id === attempt?.test_id) || takableTests[0] || manageableTests[0] || null;
+  const currentAnswerCount = attempt?.answers.filter((answer) => answer.status !== "failed").length || 0;
+  const currentQuestionCount = currentTest?.question_count || currentTest?.questions.length || 0;
+  const isLearner = ["student", "examinee", "candidate"].includes(user.role);
+  const assignmentList = isLearner ? takableTests : manageableTests;
+  const primarySection: SectionId = currentTest && takableTests.some((test) => test.id === currentTest.id) ? "take" : "builder";
   const competencies = competencyMetrics.length
     ? competencyMetrics.map((metric) => {
         const percent = metric.max_score > 0 ? Math.round((metric.score / metric.max_score) * 100) : 0;
@@ -2184,104 +2481,67 @@ function JourneyOverview({
 
   return (
     <section className="overview-layout">
-      <div className="summary-grid">
-        <MetricCard label="Доступно" value={takableTests.length} text="Можно проходить сейчас" />
-        <MetricCard label="Настраивается" value={manageableTests.length} text="Тесты под вашим управлением" />
-        <MetricCard label="Всего видно" value={tests.length} text="С учетом роли и назначений" />
-        <MetricCard label="Текущий статус" value={attempt ? ATTEMPT_STATUS_LABELS[attempt.status] : "Нет попытки"} text={status} />
-      </div>
-
-      <section className="panel">
-        <div className="panel-title"><ClipboardList size={18} /> Маршрут работы</div>
-        <div className="journey-steps">
-          {route.map(([index, label, section]) => (
-            <button key={`${index}-${label}`} className="journey-step" onClick={() => onOpen(section as SectionId)}>
-              <span>{index}</span>
-              <strong>{label}</strong>
-            </button>
-          ))}
-        </div>
+      <section className="overview-focus">
+        <span className="context-label">{attempt ? "Продолжить" : isLearner ? "Следующее задание" : "Текущий сценарий"}</span>
+        <h3>{currentTest?.title || (isLearner ? "Новых заданий пока нет" : "Создайте первый сценарий")}</h3>
+        <p>
+          {currentTest
+            ? attempt?.test_id === currentTest.id
+              ? `${currentAnswerCount} из ${currentQuestionCount || "—"} вопросов уже отправлено. Можно вернуться к любому доступному вопросу.`
+              : currentTest.description || "Откройте задание, чтобы посмотреть вопросы и начать попытку."
+            : isLearner
+              ? "Когда преподаватель назначит тест, он появится здесь."
+              : "Добавьте вопросы вручную или импортируйте их из PDF/PPTX."}
+        </p>
+        <button className="primary" type="button" onClick={() => onOpen(primarySection)}>
+          {currentTest ? (attempt ? "Продолжить задание" : isLearner ? "Открыть задание" : "Открыть конструктор") : isLearner ? "Посмотреть задания" : "Создать сценарий"}
+          <ChevronRight size={17} />
+        </button>
       </section>
 
-      <section className="panel">
-        <div className="panel-title"><BarChart3 size={18} /> Карта компетенций</div>
+      <div className="overview-columns">
+        <section className="overview-section">
+          <header className="section-line-heading">
+            <div><span className="context-label">{isLearner ? "Доступно" : "В работе"}</span><h3>{isLearner ? "Задания" : "Сценарии"}</h3></div>
+            <span>{assignmentList.length}</span>
+          </header>
+          <div className="assignment-lines">
+            {assignmentList.slice(0, 5).map((item) => (
+              <button type="button" key={item.id} onClick={() => onOpen(isLearner ? "take" : "builder")}>
+                <span><strong>{item.title}</strong><small>{TEST_TYPE_LABELS[item.test_type]} · {item.question_count} вопр.</small></span>
+                <ChevronRight size={17} aria-hidden="true" />
+              </button>
+            ))}
+            {!assignmentList.length && <p className="muted">Здесь появится следующий доступный сценарий.</p>}
+          </div>
+        </section>
+
+        <section className="overview-section">
+          <header className="section-line-heading"><div><span className="context-label">После ответов</span><h3>Темы для повторения</h3></div></header>
         {competencies.length ? (
           <div className="competency-grid">
-            {competencies.map((item) => (
+            {competencies.slice(0, 4).map((item) => (
               <div className="competency-row" key={item.name}>
                 <div>
                   <strong>{item.name}</strong>
-                  <small>{item.completed} завершенных попыток</small>
+                  <small>{item.recommendation}</small>
                 </div>
                 <span>{item.percent}%</span>
                 <progress value={item.percent} max={100} />
-                <p>{item.recommendation}</p>
               </div>
             ))}
           </div>
         ) : (
           <p className="muted">После первой проверенной попытки здесь появятся сильные и слабые темы.</p>
         )}
-      </section>
-
-      <section className="panel">
-        <div className="panel-title"><Shield size={18} /> Разделение ролей</div>
-        <div className="role-matrix">
-          {roleMatrix.map(({ action, roles }) => (
-            <div key={action}>
-              <strong>{action}</strong>
-              <span>{roles}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+        </section>
+      </div>
     </section>
   );
 }
 
 function attemptsWithoutActive(attempts: Attempt[], activeAttemptId: string) {
   return attempts.filter((item) => item.id !== activeAttemptId);
-}
-
-function DemoActionButton({
-  action,
-  config,
-  onStartDemo
-}: {
-  action: DemoActionConfig;
-  config: PlatformConfig;
-  onStartDemo: (flow: DemoFlow) => void;
-}) {
-  const icon =
-    action.flow === "builder" ? <Plus size={17} /> :
-    action.flow === "materials" ? <Database size={17} /> :
-    action.flow === "take" ? <Play size={17} /> :
-    <FileText size={17} />;
-  const content = (
-    <>
-      {icon}
-      <span><strong>{action.title}</strong><small>{action.description}</small></span>
-    </>
-  );
-  if (action.flow) {
-    const flow = action.flow;
-    return <button onClick={() => onStartDemo(flow)}>{content}</button>;
-  }
-  return (
-    <a href={action.href || config.repositoryUrl} target="_blank" rel="noreferrer">
-      {content}
-    </a>
-  );
-}
-
-function MetricCard({ label, value, text }: { label: string; value: string | number; text: string }) {
-  return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{text}</small>
-    </div>
-  );
 }
 
 function TestPicker({
@@ -2298,8 +2558,8 @@ function TestPicker({
   onSelect: (test: Test) => void;
 }) {
   return (
-    <section className="panel">
-      <div className="panel-title"><FileText size={18} /> {title}</div>
+    <section className="test-picker">
+      <header className="test-picker-heading"><span className="context-label">Задания</span><h3>{title}</h3></header>
       <div className="test-list">
         {tests.map((test) => (
           <button
@@ -2307,8 +2567,8 @@ function TestPicker({
             className={`test-row ${selectedTest?.id === test.id ? "selected" : ""}`}
             onClick={() => onSelect(test)}
           >
-            <span>{test.title}</span>
-            <small>{TEST_TYPE_LABELS[test.test_type]} · {TEST_STATUS_LABELS[test.status]} · {test.question_count} вопр.</small>
+            <span><strong>{test.title}</strong><small>{TEST_TYPE_LABELS[test.test_type]} · {test.question_count} вопр.</small></span>
+            <ChevronRight size={17} aria-hidden="true" />
           </button>
         ))}
         {!tests.length && <p className="muted">{emptyText}</p>}
@@ -2326,6 +2586,14 @@ function BuilderPanel({
   onCreateTest,
   onUpdateTest,
   onAddQuestion,
+  onUpdateQuestion,
+  onDeleteQuestion,
+  onDuplicateQuestion,
+  onMoveQuestion,
+  sourceImports,
+  onUploadPresentation,
+  onGenerateFromPresentation,
+  onAcceptPresentationCandidate,
   onCreateSkill,
   onUploadSkill,
   onUpdateSkill,
@@ -2345,6 +2613,14 @@ function BuilderPanel({
   onCreateTest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateTest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onAddQuestion: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateQuestion: (question: Question, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onDeleteQuestion: (question: Question) => Promise<void>;
+  onDuplicateQuestion: (question: Question) => Promise<void>;
+  onMoveQuestion: (questionId: string, direction: -1 | 1) => Promise<void>;
+  sourceImports: SourceImport[];
+  onUploadPresentation: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onGenerateFromPresentation: (source: SourceImport, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onAcceptPresentationCandidate: (source: SourceImport, candidateId: string) => Promise<void>;
   onCreateSkill: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUploadSkill: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateSkill: (skill: AISkill, event: FormEvent<HTMLFormElement>) => Promise<void>;
@@ -2362,8 +2638,10 @@ function BuilderPanel({
   return (
     <section className="builder-layout">
       <div className="builder-wizard" aria-label="Конструктор проверок">
-        {["Основное", "Вопросы", "Критерии", "RAG", "AI-оценщик", "Публикация"].map((step, index) => (
-          <span key={step}><b>{index + 1}</b>{step}</span>
+        {[["Основное", "builder-main"], ["Источник", "builder-source"], ["Вопросы", "builder-questions"], ["Оценивание", "builder-rules"], ["Публикация", "builder-publish"]].map(([step, target], index) => (
+          <button type="button" key={step} onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <b>{index + 1}</b>{step}
+          </button>
         ))}
       </div>
       <TestPicker
@@ -2374,7 +2652,7 @@ function BuilderPanel({
         onSelect={onSelect}
       />
 
-      <section className="panel">
+      <section className="panel" id="builder-main">
         <div className="panel-title"><Plus size={18} /> Новый сценарий</div>
         <form onSubmit={onCreateTest} className="stack compact">
           <input name="title" placeholder="Название" required minLength={3} />
@@ -2426,7 +2704,7 @@ function BuilderPanel({
         </form>
       </section>
 
-      <section className="panel builder-detail">
+      <section className="panel builder-detail" id="builder-rules">
         {manageableSelected ? (
           <>
             <div className="panel-title"><ClipboardList size={18} /> Параметры теста</div>
@@ -2507,7 +2785,14 @@ function BuilderPanel({
               <button className="secondary" type="submit">Сохранить настройки</button>
             </form>
 
-            <div className="questions-manage">
+            <SourceImportPanel
+              sourceImports={sourceImports}
+              onUpload={onUploadPresentation}
+              onGenerate={onGenerateFromPresentation}
+              onAccept={onAcceptPresentationCandidate}
+            />
+
+            <div className="questions-manage" id="builder-questions">
               <div className="panel-title"><FileText size={18} /> Вопросы</div>
               <form onSubmit={onGenerateQuestions} className="generation-form">
                 <select name="material_policy" defaultValue={getCriteriaString(selectedTest, "material_policy", "test_and_question")}>
@@ -2544,32 +2829,44 @@ function BuilderPanel({
                 </div>
               )}
               <div className="questions">
-                {selectedTest.questions.map((question) => (
-                  <div className="question" key={question.id}>
-                    <div>
-                      <strong>{question.text}</strong>
-                      <small>Максимум: {question.max_score}</small>
-                      <span className="answer-mode-badge">{QUESTION_ANSWER_MODE_LABELS[question.answer_mode]}</span>
-                    </div>
-                  </div>
+                {selectedTest.questions.map((question, index) => (
+                  <QuestionEditor
+                    key={question.id}
+                    question={question}
+                    index={index}
+                    total={selectedTest.questions.length}
+                    onSave={onUpdateQuestion}
+                    onDelete={onDeleteQuestion}
+                    onDuplicate={onDuplicateQuestion}
+                    onMove={onMoveQuestion}
+                  />
                 ))}
                 {!selectedTest.questions.length && <p className="muted">Вопросы появятся здесь после добавления.</p>}
               </div>
-	              <form onSubmit={onAddQuestion} className="question-form">
-	                <textarea name="text" placeholder="Новый вопрос" rows={3} required minLength={5} />
-	                <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии" rows={3} />
-	                <input name="competencies" placeholder="Компетенции вопроса через запятую" />
-	                <input name="max_score" type="number" min={1} step={1} defaultValue={10} />
-	                <select name="answer_mode" defaultValue="both">
-	                  <option value="both">Голос или текст</option>
-	                  <option value="audio">Только голос</option>
-	                  <option value="text">Только текст</option>
-	                </select>
+	              <form onSubmit={onAddQuestion} className="question-form accessible-form">
+                    <div className="form-heading"><strong>Добавить вопрос</strong><span>Можно изменить тип после создания.</span></div>
+                    <label>Текст вопроса<textarea name="text" rows={3} required minLength={5} /></label>
+                    <label>Тип вопроса<select name="question_type" defaultValue="open_response">
+                      <option value="open_response">Развёрнутый ответ</option>
+                      <option value="single_choice">Один вариант</option>
+                      <option value="multiple_choice">Несколько вариантов</option>
+                    </select></label>
+                    <label>Ожидаемый ответ<textarea name="expected_answer" rows={3} /></label>
+                    <details className="choice-settings"><summary><ChevronDown size={15} /> Варианты для закрытого вопроса</summary>
+                      <label>Варианты — по одному в строке<textarea name="options_text" rows={4} /></label>
+                      <label>Номера правильных вариантов<input name="correct_options" defaultValue="1" placeholder="Например: 1, 3" /></label>
+                      <label>Объяснение после ответа<textarea name="explanation" rows={2} /></label>
+                    </details>
+	                <label>Компетенции<input name="competencies" placeholder="Например: аргументация, архитектура" /></label>
+	                <label>Максимальный балл<input name="max_score" type="number" min={1} step={1} defaultValue={10} /></label>
+	                <label>Формат открытого ответа<select name="answer_mode" defaultValue="both">
+	                  <option value="both">Голос или текст</option><option value="audio">Только голос</option><option value="text">Только текст</option>
+	                </select></label>
 	                <button className="primary" type="submit"><Plus size={17} /> Добавить вопрос</button>
 	              </form>
             </div>
 
-            <section className="calibration-panel">
+            <section className="calibration-panel" id="builder-publish">
               <div className="panel-title"><Activity size={18} /> Calibration Preview</div>
               <form onSubmit={onPreviewCalibration} className="calibration-form">
                 <select name="skill_id" defaultValue={selectedSkillIds[0] || ""}>
@@ -2601,6 +2898,16 @@ function BuilderPanel({
                   ))}
                 </div>
               )}
+              <div className="publish-checklist">
+                <div><strong>Готовность к публикации</strong><span className={`status-pill ${selectedTest.status}`}>{TEST_STATUS_LABELS[selectedTest.status]}</span></div>
+                <ul>
+                  <li className={selectedTest.title.trim().length >= 3 ? "done" : ""}><CheckCircle2 size={16} /> Название и сценарий заполнены</li>
+                  <li className={selectedTest.questions.length > 0 ? "done" : ""}><CheckCircle2 size={16} /> Добавлен хотя бы один вопрос</li>
+                  <li className={selectedTest.questions.every((question) => question.question_type === "open_response" ? Boolean(question.expected_answer.trim()) : question.correct_option_ids.length > 0) ? "done" : ""}><CheckCircle2 size={16} /> У вопросов настроены ответы</li>
+                  <li className={calibrationPreview ? "done" : ""}><CheckCircle2 size={16} /> Оценивание проверено на примерах</li>
+                </ul>
+                <p>Чтобы открыть assessment участникам, выберите статус «Опубликован» в параметрах и сохраните настройки.</p>
+              </div>
             </section>
           </>
         ) : (
@@ -2616,6 +2923,289 @@ function BuilderPanel({
         onDelete={onDeleteSkill}
       />
     </section>
+  );
+}
+
+function SourceImportPanel({
+  sourceImports,
+  onUpload,
+  onGenerate,
+  onAccept
+}: {
+  sourceImports: SourceImport[];
+  onUpload: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onGenerate: (source: SourceImport, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onAccept: (source: SourceImport, candidateId: string) => Promise<void>;
+}) {
+  const [stage, setStage] = useState<1 | 2 | 3 | 4>(() => sourceImports.length ? 2 : 1);
+  const [selectedSourceId, setSelectedSourceId] = useState(() => sourceImports[0]?.id || "");
+  const [selectedSegments, setSelectedSegments] = useState<Record<string, string[]>>({});
+  const [selectedFileName, setSelectedFileName] = useState("");
+  const [dismissedCandidates, setDismissedCandidates] = useState<Set<string>>(() => new Set());
+  const activeSource = sourceImports.find((source) => source.id === selectedSourceId) || sourceImports[0] || null;
+  const defaultSelectedIds = activeSource
+    ? activeSource.segments.filter((segment) => !activeSource.excluded_segment_ids.includes(segment.id)).map((segment) => segment.id)
+    : [];
+  const selectedSegmentIds = new Set(activeSource ? (selectedSegments[activeSource.id] || defaultSelectedIds) : []);
+
+  function toggleSegment(segmentId: string) {
+    if (!activeSource) return;
+    const next = new Set(selectedSegmentIds);
+    if (next.has(segmentId)) next.delete(segmentId);
+    else next.add(segmentId);
+    setSelectedSegments((current) => ({ ...current, [activeSource.id]: [...next] }));
+  }
+
+  async function submitUpload(event: FormEvent<HTMLFormElement>) {
+    await onUpload(event);
+    setSelectedSourceId("");
+    setSelectedFileName("");
+    setStage(2);
+  }
+
+  async function submitGeneration(event: FormEvent<HTMLFormElement>) {
+    if (!activeSource) return;
+    await onGenerate(activeSource, event);
+    setStage(4);
+  }
+
+  const statusLabel = activeSource?.status === "ready"
+    ? "Материал разобран"
+    : activeSource?.status === "completed"
+      ? "Вопросы готовы"
+      : activeSource?.status === "failed"
+        ? "Не удалось обработать"
+        : "Обрабатываем материал";
+
+  return (
+    <section className="source-import-panel" id="builder-source">
+      <header className="source-import-heading">
+        <div>
+          <span className="context-label">Конструктор</span>
+          <h3>Импорт лекции</h3>
+          <p>Превратите страницы или слайды в вопросы, сохранив связь с исходным материалом.</p>
+        </div>
+        {sourceImports.length > 0 && (
+          <label className="source-history-select">
+            Материал
+            <select
+              value={activeSource?.id || ""}
+              onChange={(event) => {
+                setSelectedSourceId(event.target.value);
+                setStage(2);
+              }}
+            >
+              {sourceImports.map((source) => <option key={source.id} value={source.id}>{source.source_filename}</option>)}
+            </select>
+          </label>
+        )}
+      </header>
+
+      <nav className="source-steps" aria-label="Этапы импорта">
+        {[
+          [1, "Источник"],
+          [2, "Фрагменты"],
+          [3, "Параметры"],
+          [4, "Вопросы"]
+        ].map(([step, label]) => {
+          const stepNumber = Number(step) as 1 | 2 | 3 | 4;
+          const disabled = stepNumber > 1 && !activeSource;
+          return (
+            <button
+              key={step}
+              type="button"
+              className={stage === stepNumber ? "active" : stage > stepNumber ? "done" : ""}
+              disabled={disabled}
+              onClick={() => setStage(stepNumber)}
+              aria-current={stage === stepNumber ? "step" : undefined}
+            >
+              <span>{stage > stepNumber ? <CheckCircle2 size={15} /> : step}</span>{label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {stage === 1 && (
+        <div className="source-stage source-stage-upload">
+          <div className="source-kind-tabs" role="tablist" aria-label="Тип источника">
+            <button type="button" className="active" role="tab" aria-selected="true"><Presentation size={18} /> PDF или PPTX</button>
+            <button type="button" role="tab" aria-selected="false" disabled><Play size={18} /> YouTube <small>скоро</small></button>
+            <button type="button" role="tab" aria-selected="false" disabled><FileText size={18} /> Текст <small>скоро</small></button>
+          </div>
+          <form onSubmit={submitUpload} className="source-upload-form">
+            <label className="source-file-picker" htmlFor="lecture-file">
+              <input
+                id="lecture-file"
+                className="visually-hidden-input"
+                name="presentation"
+                type="file"
+                accept=".pptx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                required
+                onChange={(event) => setSelectedFileName(event.target.files?.[0]?.name || "")}
+              />
+              <span className="source-file-icon"><Upload size={22} /></span>
+              <span className="source-file-copy">
+                <strong>{selectedFileName || "Выберите файл лекции"}</strong>
+                <small>{selectedFileName ? "Файл готов к загрузке" : "PDF или PPTX до 25 МБ"}</small>
+              </span>
+              <span className="source-file-action">Выбрать файл</span>
+            </label>
+            <p className="source-upload-note">Текст извлекается по страницам и слайдам. Заметки докладчика из PPTX тоже сохраняются.</p>
+            <button className="primary" type="submit" disabled={!selectedFileName}>Загрузить и продолжить <ChevronRight size={17} /></button>
+          </form>
+          {sourceImports.length > 0 && (
+            <button type="button" className="source-return-link" onClick={() => setStage(2)}>Вернуться к последнему импорту</button>
+          )}
+        </div>
+      )}
+
+      {stage === 2 && (
+        <div className="source-stage">
+          {activeSource ? (
+            <>
+              <div className="source-stage-bar">
+                <div><span className={`source-status-dot ${activeSource.status}`} /><span>{statusLabel}</span></div>
+                <strong>{activeSource.source_filename}</strong>
+                <small>{activeSource.segments.length} страниц или слайдов</small>
+              </div>
+              {activeSource.error_message && <p className="error">{activeSource.error_message}</p>}
+              {activeSource.segments.length > 0 ? (
+                <div className="source-fragments">
+                  <div className="source-fragments-head">
+                    <div><strong>Выберите материал</strong><small>Вопросы будут созданы только по отмеченным фрагментам.</small></div>
+                    <span>{selectedSegmentIds.size} из {activeSource.segments.length}</span>
+                  </div>
+                  {activeSource.segments.map((segment) => (
+                    <label key={segment.id} className="source-fragment">
+                      <input type="checkbox" checked={selectedSegmentIds.has(segment.id)} onChange={() => toggleSegment(segment.id)} />
+                      <b>{segment.index}</b>
+                      <span><strong>{segment.title || `Страница ${segment.index}`}</strong><small>{(segment.text || segment.notes || "На странице не найден текст").slice(0, 180)}</small></span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="source-processing"><RefreshCw className="spin" size={20} /><strong>Извлекаем содержание</strong><span>Можно закрыть страницу — обработка продолжится в фоне.</span></div>
+              )}
+              <div className="source-stage-actions">
+                <button className="secondary" type="button" onClick={() => setStage(1)}>Другой файл</button>
+                <button className="primary" type="button" disabled={!activeSource.segments.length || !selectedSegmentIds.size} onClick={() => setStage(3)}>Настроить вопросы <ChevronRight size={17} /></button>
+              </div>
+            </>
+          ) : (
+            <div className="source-processing"><RefreshCw className="spin" size={20} /><strong>Файл загружается</strong><span>После загрузки здесь появятся страницы или слайды.</span></div>
+          )}
+        </div>
+      )}
+
+      {stage === 3 && activeSource && (
+        <form onSubmit={submitGeneration} className="source-stage source-settings">
+          {activeSource.segments.map((segment) => (
+            <input key={segment.id} type="hidden" name={`segment-${segment.id}`} value={selectedSegmentIds.has(segment.id) ? "on" : ""} />
+          ))}
+          <div className="source-setting-row">
+            <label>Количество вопросов<input name="count" type="number" min={1} max={30} defaultValue={8} /></label>
+            <label>Сложность<select name="difficulty" defaultValue="balanced"><option value="easy">Базовая</option><option value="balanced">Сбалансированная</option><option value="hard">Продвинутая</option></select></label>
+          </div>
+          <fieldset className="source-question-types">
+            <legend>Типы вопросов</legend>
+            <label><input type="checkbox" name="question_types" value="open_response" defaultChecked /><span><strong>Развёрнутый ответ</strong><small>Проверка смысла и аргументации</small></span></label>
+            <label><input type="checkbox" name="question_types" value="single_choice" defaultChecked /><span><strong>Один вариант</strong><small>Быстрая проверка фактов</small></span></label>
+            <label><input type="checkbox" name="question_types" value="multiple_choice" /><span><strong>Несколько вариантов</strong><small>Связи и составные понятия</small></span></label>
+          </fieldset>
+          <div className="source-selection-summary"><FileText size={18} /><span><strong>{selectedSegmentIds.size} фрагментов</strong><small>Источники останутся прикреплены к каждому вопросу.</small></span></div>
+          <div className="source-stage-actions">
+            <button className="secondary" type="button" onClick={() => setStage(2)}>Назад</button>
+            <button className="primary" type="submit" disabled={activeSource.status === "queued" || activeSource.status === "generating"}>
+              {activeSource.status === "queued" || activeSource.status === "generating" ? <RefreshCw className="spin" size={16} /> : <Presentation size={16} />} Создать вопросы
+            </button>
+          </div>
+        </form>
+      )}
+
+      {stage === 4 && activeSource && (
+        <div className="source-stage">
+          <div className="source-candidates-head">
+            <div><span className="context-label">Проверка</span><h4>Кандидаты вопросов</h4><p>Добавляйте только подходящие — после этого их можно отредактировать в обычном конструкторе.</p></div>
+            <span>{activeSource.candidates.filter((candidate) => candidate.status === "accepted").length} добавлено</span>
+          </div>
+          {activeSource.candidates.length > 0 ? (
+            <div className="source-candidates">
+              {activeSource.candidates.filter((candidate) => !dismissedCandidates.has(candidate.id)).map((candidate, index) => (
+                <article key={candidate.id} className="source-candidate">
+                  <header><span>Вопрос {index + 1}</span><small>{QUESTION_TYPE_LABELS[candidate.question_type]}</small></header>
+                  <h5>{candidate.text}</h5>
+                  {candidate.options?.length > 0 && <ol>{candidate.options.map((option) => <li key={option.id}>{option.text}</li>)}</ol>}
+                  <p><FileText size={14} /> {candidate.source_refs?.[0]?.label || activeSource.source_filename}</p>
+                  <footer>
+                    <button className="source-dismiss" type="button" disabled={candidate.status === "accepted"} onClick={() => setDismissedCandidates((current) => new Set(current).add(candidate.id))}>Отложить</button>
+                    <button className="secondary" type="button" disabled={candidate.status === "accepted"} onClick={() => onAccept(activeSource, candidate.id)}>
+                      <Plus size={15} /> {candidate.status === "accepted" ? "Добавлен" : "Добавить в тест"}
+                    </button>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="source-processing"><RefreshCw className="spin" size={20} /><strong>Генерируем вопросы</strong><span>Обычно это занимает несколько минут. Результат сохранится в этом импорте.</span></div>
+          )}
+          <div className="source-stage-actions">
+            <button className="secondary" type="button" onClick={() => setStage(3)}>Изменить параметры</button>
+            <button className="primary" type="button" onClick={() => setStage(1)}>Импортировать ещё</button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function QuestionEditor({
+  question,
+  index,
+  total,
+  onSave,
+  onDelete,
+  onDuplicate,
+  onMove
+}: {
+  question: Question;
+  index: number;
+  total: number;
+  onSave: (question: Question, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onDelete: (question: Question) => Promise<void>;
+  onDuplicate: (question: Question) => Promise<void>;
+  onMove: (questionId: string, direction: -1 | 1) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <article className="question-editor">
+      <header>
+        <span className="question-drag"><GripVertical size={17} /> {index + 1}</span>
+        <div><strong>{question.text}</strong><small>{QUESTION_TYPE_LABELS[question.question_type]} · {question.max_score} баллов</small></div>
+        <div className="question-actions">
+          <button className="ghost icon-button" type="button" aria-label="Переместить вопрос вверх" disabled={index === 0} onClick={() => onMove(question.id, -1)}><ChevronLeft size={16} /></button>
+          <button className="ghost icon-button" type="button" aria-label="Переместить вопрос вниз" disabled={index === total - 1} onClick={() => onMove(question.id, 1)}><ChevronRight size={16} /></button>
+          <button className="secondary" type="button" onClick={() => onDuplicate(question)}>Копировать</button>
+          <button className="secondary" type="button" onClick={() => setEditing((value) => !value)}>{editing ? "Свернуть" : "Изменить"}</button>
+          <button className="danger icon-button" type="button" aria-label="Удалить вопрос" onClick={() => onDelete(question)}><Trash2 size={16} /></button>
+        </div>
+      </header>
+      {editing && (
+        <form className="question-edit-form accessible-form" onSubmit={async (event) => { await onSave(question, event); setEditing(false); }}>
+          <label>Текст вопроса<textarea name="text" rows={3} defaultValue={question.text} required minLength={5} /></label>
+          <label>Тип<select name="question_type" defaultValue={question.question_type}><option value="open_response">Развёрнутый ответ</option><option value="single_choice">Один вариант</option><option value="multiple_choice">Несколько вариантов</option></select></label>
+          <label>Ожидаемый ответ<textarea name="expected_answer" rows={3} defaultValue={question.expected_answer} /></label>
+          <details className="choice-settings" open={question.question_type !== "open_response"}><summary><ChevronDown size={15} /> Варианты ответа</summary>
+            <label>По одному варианту в строке<textarea name="options_text" rows={4} defaultValue={question.options.map((item) => item.text).join("\n")} /></label>
+            <label>Номера правильных вариантов<input name="correct_options" defaultValue={question.correct_option_ids.map((id) => question.options.findIndex((item) => item.id === id) + 1).filter(Boolean).join(", ")} /></label>
+            <label>Объяснение<textarea name="explanation" rows={2} defaultValue={question.explanation} /></label>
+          </details>
+          <label>Компетенции<input name="competencies" defaultValue={question.competencies.map((item) => item.name).join(", ")} /></label>
+          <label>Максимальный балл<input name="max_score" type="number" min={1} defaultValue={question.max_score} /></label>
+          <label>Формат открытого ответа<select name="answer_mode" defaultValue={question.answer_mode}><option value="both">Голос или текст</option><option value="audio">Только голос</option><option value="text">Только текст</option></select></label>
+          <button className="primary" type="submit">Сохранить вопрос</button>
+        </form>
+      )}
+    </article>
   );
 }
 
@@ -2908,6 +3498,7 @@ function TestRunner({
   onStart,
   onUpload,
   onTextSubmit,
+  onChoiceSubmit,
   onError
 }: {
   test: Test;
@@ -2916,11 +3507,56 @@ function TestRunner({
   onStart: () => void;
   onUpload: (questionId: string, blob: Blob) => Promise<void>;
   onTextSubmit: (questionId: string, text: string) => Promise<void>;
+  onChoiceSubmit: (questionId: string, selectedOptionIds: string[]) => Promise<void>;
   onError: (message: string) => void;
 }) {
   const answerByQuestion = useMemo(() => new Map(answers.map((answer) => [answer.question_id, answer])), [answers]);
   const visibleQuestions = attempt?.questions?.length ? attempt.questions : test.questions;
   const hiddenCount = Math.max((test.question_count || test.questions.length) - visibleQuestions.length, 0);
+  const totalQuestions = test.question_count || test.questions.length;
+  const answeredCount = answers.filter((answer) => answer.status !== "failed").length;
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const [selectedQuestionId, setSelectedQuestionId] = useState(() => visibleQuestions[0]?.id || "");
+  const [skippedQuestionIds, setSkippedQuestionIds] = useState<Set<string>>(() => new Set());
+  const [draftedQuestionIds, setDraftedQuestionIds] = useState<Set<string>>(() => typeof window === "undefined"
+    ? new Set()
+    : new Set(visibleQuestions.filter((question) => Boolean(localStorage.getItem(`tuneai-draft-${question.id}`))).map((question) => question.id)));
+
+  useEffect(() => {
+    if (!attempt || !test.time_limit_seconds || attempt.status === "completed") {
+      return;
+    }
+    const update = () => {
+      const elapsed = Math.floor((Date.now() - new Date(attempt.started_at).getTime()) / 1000);
+      setRemainingSeconds(Math.max(test.time_limit_seconds! - elapsed, 0));
+    };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [attempt, test.time_limit_seconds]);
+
+  const effectiveSelectedQuestionId = visibleQuestions.some((question) => question.id === selectedQuestionId)
+    ? selectedQuestionId
+    : visibleQuestions[0]?.id || "";
+  const question = visibleQuestions.find((item) => item.id === effectiveSelectedQuestionId) || visibleQuestions[0] || null;
+
+  function skipCurrentQuestion() {
+    if (!question) return;
+    setSkippedQuestionIds((current) => new Set(current).add(question.id));
+    const currentIndex = visibleQuestions.findIndex((item) => item.id === question.id);
+    const nextQuestion = [...visibleQuestions.slice(currentIndex + 1), ...visibleQuestions.slice(0, currentIndex)]
+      .find((item) => !answerByQuestion.has(item.id) && item.id !== question.id);
+    if (nextQuestion) setSelectedQuestionId(nextQuestion.id);
+  }
+
+  function setDraftState(questionId: string, hasDraft: boolean) {
+    setDraftedQuestionIds((current) => {
+      const next = new Set(current);
+      if (hasDraft) next.add(questionId);
+      else next.delete(questionId);
+      return next;
+    });
+  }
 
   return (
     <div className="runner">
@@ -2929,7 +3565,13 @@ function TestRunner({
           <h3>{test.title}</h3>
           <p>{test.description || "Описание не добавлено"}</p>
         </div>
-        <button className="primary" onClick={onStart}><Play size={17} /> Начать</button>
+        <button className="primary" onClick={onStart}><Play size={17} /> {attempt ? "Начать заново" : "Начать задание"}</button>
+      </div>
+
+      <div className="attempt-progress" aria-label={`Выполнено ${answeredCount} из ${totalQuestions}`}>
+        <div><span>Прогресс</span><strong>{answeredCount} / {totalQuestions}</strong></div>
+        <progress value={answeredCount} max={Math.max(totalQuestions, 1)} />
+        {remainingSeconds !== null && <span className={remainingSeconds < 60 ? "timer urgent" : "timer"}>Осталось {Math.floor(remainingSeconds / 60)}:{String(remainingSeconds % 60).padStart(2, "0")}</span>}
       </div>
 
       {attempt && (
@@ -2940,34 +3582,71 @@ function TestRunner({
         </div>
       )}
 
-      <div className="questions">
-        {visibleQuestions.map((question) => (
-          <div className="question" key={question.id}>
-            <div>
-              <strong>{question.text}</strong>
-              <small>Максимум: {question.max_score}</small>
-              <span className="answer-mode-badge">{QUESTION_ANSWER_MODE_LABELS[question.answer_mode]}</span>
+      <div className="question-workspace">
+        {visibleQuestions.length > 0 && (
+          <nav className="question-navigator" aria-label="Вопросы задания">
+            <div className="question-navigator-head"><span>Вопросы</span><strong>{answeredCount} / {totalQuestions}</strong></div>
+            {visibleQuestions.map((question, index) => {
+              const isAnswered = answerByQuestion.has(question.id);
+              const state = isAnswered ? "answered" : draftedQuestionIds.has(question.id) ? "draft" : skippedQuestionIds.has(question.id) ? "skipped" : "new";
+              const stateLabel = isAnswered ? "Ответ отправлен" : state === "draft" ? "Есть черновик" : state === "skipped" ? "Отложено" : "Не начат";
+              return (
+                <button
+                  type="button"
+                  key={question.id}
+                  className={effectiveSelectedQuestionId === question.id ? "active" : ""}
+                  aria-current={effectiveSelectedQuestionId === question.id ? "step" : undefined}
+                  onClick={() => setSelectedQuestionId(question.id)}
+                >
+                  <span className={`question-number ${state}`}>{isAnswered ? <CheckCircle2 size={15} /> : index + 1}</span>
+                  <span><strong>{question.text}</strong><small>{stateLabel}</small></span>
+                </button>
+              );
+            })}
+            {hiddenCount > 0 && <p className="question-lock-note">Ещё {hiddenCount} вопр. откроются по правилам задания.</p>}
+          </nav>
+        )}
+
+        {question && (
+          <section className="question-detail" aria-labelledby={`question-${question.id}`}>
+            <header>
+              <span className="context-label">Вопрос {visibleQuestions.findIndex((item) => item.id === question.id) + 1} из {totalQuestions}</span>
+              <h4 id={`question-${question.id}`}>{question.text}</h4>
+              <div className="question-meta"><span>{QUESTION_TYPE_LABELS[question.question_type]}</span><span className="answer-mode-badge">{QUESTION_ANSWER_MODE_LABELS[question.answer_mode]}</span><span>до {question.max_score} баллов</span></div>
+            </header>
+            <div className="question-answer-area">
+              {question.question_type === "open_response" ? (
+                <AnswerSubmitter
+                  key={question.id}
+                  answerMode={question.answer_mode}
+                  questionId={question.id}
+                  disabled={!attempt || Boolean(answerByQuestion.get(question.id))}
+                  onUpload={(blob) => onUpload(question.id, blob)}
+                  onTextSubmit={(text) => onTextSubmit(question.id, text)}
+                  onDraftChange={(hasDraft) => setDraftState(question.id, hasDraft)}
+                  onError={onError}
+                />
+              ) : (
+                <ChoiceSubmitter
+                  key={question.id}
+                  question={question}
+                  disabled={!attempt || Boolean(answerByQuestion.get(question.id))}
+                  onSubmit={(selected) => onChoiceSubmit(question.id, selected)}
+                  onError={onError}
+                />
+              )}
+              {attempt && !answerByQuestion.get(question.id) && (
+                <button className="ghost skip-question" type="button" onClick={skipCurrentQuestion}><SkipForward size={16} /> Пропустить пока</button>
+              )}
             </div>
-            <AnswerSubmitter
-              answerMode={question.answer_mode}
-              disabled={!attempt || Boolean(answerByQuestion.get(question.id))}
-              onUpload={(blob) => onUpload(question.id, blob)}
-              onTextSubmit={(text) => onTextSubmit(question.id, text)}
-              onError={onError}
-            />
             <AnswerStatusView answer={answerByQuestion.get(question.id)} />
-          </div>
-        ))}
+          </section>
+        )}
+
         {!visibleQuestions.length && (
           <div className="locked-questions">
             <Shield size={18} />
             <span>Вопросы откроются после начала попытки.</span>
-          </div>
-        )}
-        {hiddenCount > 0 && visibleQuestions.length > 0 && (
-          <div className="locked-questions">
-            <Shield size={18} />
-            <span>Следующий вопрос откроется после отправки ответа.</span>
           </div>
         )}
       </div>
@@ -2977,15 +3656,19 @@ function TestRunner({
 
 function AnswerSubmitter({
   answerMode,
+  questionId,
   disabled,
   onUpload,
   onTextSubmit,
+  onDraftChange,
   onError
 }: {
   answerMode: QuestionAnswerMode;
+  questionId: string;
   disabled: boolean;
   onUpload: (blob: Blob) => Promise<void>;
   onTextSubmit: (text: string) => Promise<void>;
+  onDraftChange?: (hasDraft: boolean) => void;
   onError: (message: string) => void;
 }) {
   const [mode, setMode] = useState<"audio" | "text">("audio");
@@ -2993,6 +3676,7 @@ function AnswerSubmitter({
   const canUseAudio = answerMode !== "text";
   const canUseText = answerMode !== "audio";
   const activeMode = mode === "audio" && canUseAudio ? "audio" : canUseText ? "text" : "audio";
+  const draftKey = `tuneai-draft-${questionId}`;
 
   async function submitText(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3005,6 +3689,8 @@ function AnswerSubmitter({
     setBusy(true);
     try {
       await onTextSubmit(text);
+      localStorage.removeItem(draftKey);
+      onDraftChange?.(false);
       event.currentTarget.reset();
     } catch (err) {
       onError(getUserErrorMessage(err, "Не удалось отправить текстовый ответ."));
@@ -3037,12 +3723,73 @@ function AnswerSubmitter({
         <Recorder disabled={disabled} onUpload={onUpload} onError={onError} />
       ) : (
         <form className="text-answer-form" onSubmit={submitText}>
-          <textarea name="text" rows={4} placeholder="Введите ответ текстом" disabled={disabled || busy} required />
+          <textarea
+            name="text"
+            rows={4}
+            placeholder="Введите ответ текстом"
+            disabled={disabled || busy}
+            required
+            defaultValue={typeof window === "undefined" ? "" : localStorage.getItem(draftKey) || ""}
+            onChange={(event) => {
+              localStorage.setItem(draftKey, event.target.value);
+              onDraftChange?.(Boolean(event.target.value.trim()));
+            }}
+          />
           <button className="secondary" disabled={disabled || busy} type="submit">
             <Upload size={16} /> {busy ? "Проверяем" : "Отправить текст"}
           </button>
         </form>
       )}
+    </div>
+  );
+}
+
+function ChoiceSubmitter({
+  question,
+  disabled,
+  onSubmit,
+  onError
+}: {
+  question: Attempt["questions"][number];
+  disabled: boolean;
+  onSubmit: (selectedOptionIds: string[]) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const multiple = question.question_type === "multiple_choice";
+  async function submit() {
+    if (!selected.length) {
+      onError("Выберите хотя бы один вариант.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSubmit(selected);
+    } catch (err) {
+      onError(getUserErrorMessage(err, "Не удалось сохранить ответ."));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="choice-submitter">
+      <fieldset disabled={disabled || busy}>
+        <legend>{multiple ? "Выберите все подходящие варианты" : "Выберите один вариант"}</legend>
+        {question.options.map((option) => (
+          <label key={option.id} className={selected.includes(option.id) ? "selected" : ""}>
+            <input
+              type={multiple ? "checkbox" : "radio"}
+              name={`choice-${question.id}`}
+              value={option.id}
+              checked={selected.includes(option.id)}
+              onChange={() => setSelected((current) => multiple ? (current.includes(option.id) ? current.filter((id) => id !== option.id) : [...current, option.id]) : [option.id])}
+            />
+            <span>{option.text}</span>
+          </label>
+        ))}
+      </fieldset>
+      <button className="secondary" type="button" disabled={disabled || busy} onClick={submit}>{busy ? "Сохраняем…" : "Ответить"}</button>
     </div>
   );
 }
@@ -3060,6 +3807,17 @@ function Recorder({
   const chunksRef = useRef<Blob[]>([]);
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [recording]);
+
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
   async function start() {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -3070,6 +3828,8 @@ function Recorder({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunksRef.current = [];
+      setSeconds(0);
+      setRecordedBlob(null);
       const preferredType = [
         "audio/ogg;codecs=opus",
         "audio/webm;codecs=opus",
@@ -3082,18 +3842,12 @@ function Recorder({
           chunksRef.current.push(event.data);
         }
       };
-      recorder.onstop = async () => {
-        setBusy(true);
+      recorder.onstop = () => {
         const recordedType = recorder.mimeType || chunksRef.current[0]?.type || "audio/webm";
         const blob = new Blob(chunksRef.current, { type: recordedType });
-        try {
-          await onUpload(blob);
-        } catch (err) {
-          onError(getUserErrorMessage(err, "Не удалось отправить запись. Попробуйте еще раз."));
-        } finally {
-          stream.getTracks().forEach((track) => track.stop());
-          setBusy(false);
-        }
+        setRecordedBlob(blob);
+        setPreviewUrl(URL.createObjectURL(blob));
+        stream.getTracks().forEach((track) => track.stop());
       };
       recorder.start();
       recorderRef.current = recorder;
@@ -3110,8 +3864,33 @@ function Recorder({
     setRecording(false);
   }
 
+
+  async function submitRecording() {
+    if (!recordedBlob) return;
+    setBusy(true);
+    try {
+      await onUpload(recordedBlob);
+      setRecordedBlob(null);
+      setPreviewUrl("");
+    } catch (err) {
+      onError(getUserErrorMessage(err, "Не удалось отправить запись. Попробуйте ещё раз."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (recording) {
-    return <button className="danger" onClick={stop}><Square size={16} /> Остановить</button>;
+    return <button className="danger" onClick={stop}><Square size={16} /> Остановить · {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</button>;
+  }
+  if (recordedBlob && previewUrl) {
+    return (
+      <div className="recording-preview">
+        <audio controls src={previewUrl} />
+        <span>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span>
+        <button className="ghost" type="button" onClick={() => { setRecordedBlob(null); setPreviewUrl(""); }}><Trash2 size={15} /> Перезаписать</button>
+        <button className="secondary" type="button" disabled={busy} onClick={submitRecording}><Upload size={15} /> {busy ? "Отправляем…" : "Отправить запись"}</button>
+      </div>
+    );
   }
   return (
     <button className="secondary" disabled={disabled || busy} onClick={start}>
@@ -3349,6 +4128,7 @@ function AdminPanel({
   systemHealth,
   aiProviders,
   groups,
+  auditLogs,
   materials,
   materialTestId,
   lastInvite,
@@ -3360,6 +4140,7 @@ function AdminPanel({
   onResetPassword,
   onCreateGroup,
   onAddGroupMember,
+  onRemoveGroupMember,
   onUpdateUser,
   onUpdateTestStatus,
   onDeleteTest,
@@ -3368,7 +4149,9 @@ function AdminPanel({
   onCreateAIProvider,
   onUpdateAIProvider,
   onActivateAIProvider,
-  onDeleteAIProvider
+  onDeleteAIProvider,
+  onRetryFailedJob,
+  onExportResults
 }: {
   dashboard: AdminDashboard | null;
   users: User[];
@@ -3378,6 +4161,7 @@ function AdminPanel({
   systemHealth: SystemHealth | null;
   aiProviders: AIProviderConfig[];
   groups: Group[];
+  auditLogs: AuditLog[];
   materials: Material[];
   materialTestId: string;
   lastInvite: UserInvite | null;
@@ -3389,6 +4173,7 @@ function AdminPanel({
   onResetPassword: (user: User) => Promise<void>;
   onCreateGroup: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onAddGroupMember: (group: Group, event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onRemoveGroupMember: (group: Group, userId: string) => Promise<void>;
   onUpdateUser: (user: User, updates: Partial<Pick<User, "role" | "is_active">>) => Promise<void>;
   onUpdateTestStatus: (test: Test, status: Test["status"]) => Promise<void>;
   onDeleteTest: (test: Test) => Promise<void>;
@@ -3398,6 +4183,8 @@ function AdminPanel({
   onUpdateAIProvider: (profile: AIProviderConfig, event: FormEvent<HTMLFormElement>) => Promise<void>;
   onActivateAIProvider: (profile: AIProviderConfig) => Promise<void>;
   onDeleteAIProvider: (profile: AIProviderConfig) => Promise<void>;
+  onRetryFailedJob: (job: AdminFailedJob) => Promise<void>;
+  onExportResults: () => Promise<void>;
 }) {
   const [userQuery, setUserQuery] = useState("");
   const [userStatus, setUserStatus] = useState<"all" | "active" | "blocked">("all");
@@ -3407,9 +4194,9 @@ function AdminPanel({
     ["Пользователи", dashboard?.users ?? 0],
     ["Тесты", dashboard?.tests ?? 0],
     ["Попытки", dashboard?.attempts ?? 0],
-    ["Проверено ответов", dashboard?.answers_completed ?? 0],
-    ["Ошибки ответов", dashboard?.answers_failed ?? 0],
-    ["В очереди", dashboard?.outbox_pending ?? 0]
+    ["Завершено", dashboard?.attempts_completed ?? 0],
+    ["Средний результат", `${dashboard?.average_score_percent ?? 0}%`],
+    ["Требует внимания", (dashboard?.answers_failed ?? 0) + (dashboard?.outbox_pending ?? 0)]
   ];
   const normalizedUserQuery = userQuery.trim().toLowerCase();
   const visibleUsers = users.filter((item) => {
@@ -3435,8 +4222,14 @@ function AdminPanel({
           <div className="panel-title"><BarChart3 size={18} /> Администрирование</div>
           <p className="muted">Управление аккаунтами, тестами, материалами и операционным состоянием платформы.</p>
         </div>
-        <button className="ghost" onClick={onRefresh}><Activity size={17} /> Обновить данные</button>
+        <div className="admin-head-actions"><button className="secondary" onClick={onExportResults}><Upload size={17} /> Экспорт CSV</button><button className="ghost" onClick={onRefresh}><Activity size={17} /> Обновить данные</button></div>
       </div>
+
+      <nav className="admin-subnav" aria-label="Разделы админки">
+        {[["Система", "admin-system"], ["Группы", "admin-groups"], ["Пользователи", "admin-users"], ["Assessments", "admin-tests"], ["Попытки", "admin-attempts"], ["Ошибки", "admin-errors"], ["Audit log", "admin-audit"]].map(([label, id]) => (
+          <button type="button" key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{label}</button>
+        ))}
+      </nav>
 
       <form onSubmit={onCreateUser} className="admin-user-form">
         <input name="full_name" placeholder="Имя и фамилия" required minLength={2} />
@@ -3464,7 +4257,7 @@ function AdminPanel({
       </div>
 
       <div className="admin-sections">
-        <section className="admin-table-wrap admin-wide">
+        <section className="admin-table-wrap admin-wide" id="admin-system">
           <h3><HeartPulse size={17} /> Система</h3>
           <div className="health-grid">
             {(systemHealth?.checks || []).map((check) => (
@@ -3486,7 +4279,7 @@ function AdminPanel({
           onDelete={onDeleteAIProvider}
         />
 
-        <section className="admin-table-wrap admin-wide">
+        <section className="admin-table-wrap admin-wide" id="admin-groups">
           <h3><Users size={17} /> Группы и потоки</h3>
           <form onSubmit={onCreateGroup} className="group-create-form">
             <input name="name" placeholder="Название группы: 10А, Python поток, кандидаты backend" required minLength={2} />
@@ -3502,7 +4295,7 @@ function AdminPanel({
                   <div>
                     <strong>{group.name}</strong>
                     <p>{group.description || "Без описания"}</p>
-                    <small>{group.members.length ? group.members.map((member) => member.email).join(", ") : "Пока нет участников"}</small>
+                    <div className="group-members">{group.members.length ? group.members.map((member) => <span key={member.id}>{member.full_name}<button type="button" aria-label={`Удалить ${member.full_name} из группы`} onClick={() => onRemoveGroupMember(group, member.id)}>×</button></span>) : <small>Пока нет участников</small>}</div>
                   </div>
                   {availableUsers.length > 0 && (
                     <form onSubmit={(event) => onAddGroupMember(group, event)}>
@@ -3522,7 +4315,7 @@ function AdminPanel({
           </div>
         </section>
 
-        <section className="admin-table-wrap admin-wide">
+        <section className="admin-table-wrap admin-wide" id="admin-users">
           <h3><Users size={17} /> Пользователи</h3>
           <form onSubmit={onCreateInvite} className="admin-user-form invite-form">
             <input name="full_name" placeholder="Имя для приглашения" required minLength={2} />
@@ -3606,7 +4399,7 @@ function AdminPanel({
           />
         </section>
 
-        <section className="admin-table-wrap admin-wide">
+        <section className="admin-table-wrap admin-wide" id="admin-tests">
           <h3><ClipboardList size={17} /> Тесты</h3>
           <div className="admin-filters">
             <label>
@@ -3693,30 +4486,17 @@ function AdminPanel({
           />
         </section>
 
-        <AdminTable
-          icon={<CheckCircle2 size={17} />}
-          title="Попытки"
-          headers={["Пользователь", "Тест", "Статус", "Ответы", "Балл"]}
-          rows={attempts.map((item) => [
-            item.user_email,
-            item.test_title,
-            ATTEMPT_STATUS_LABELS[item.status],
-            `${item.answers_completed}/${item.answers_total}`,
-            item.total_score === null ? "-" : `${item.total_score}/${item.max_score}`
-          ])}
-        />
-        <AdminTable
-          icon={<AlertTriangle size={17} />}
-          title="Ошибки обработки"
-          headers={["Тип", "Статус", "Пользователь/тест", "Сообщение"]}
-          rows={failedJobs.map((item) => [
-            formatJobKind(item.kind),
-            formatJobStatus(item.status),
-            item.user_email || item.test_title || item.aggregate_id || "-",
-            formatProcessingError(item.error_message)
-          ])}
+        <section id="admin-attempts"><AdminTable icon={<CheckCircle2 size={17} />} title="Попытки" headers={["Пользователь", "Тест", "Статус", "Ответы", "Балл"]} rows={attempts.map((item) => [item.user_email, item.test_title, ATTEMPT_STATUS_LABELS[item.status], `${item.answers_completed}/${item.answers_total}`, item.total_score === null ? "-" : `${item.total_score}/${item.max_score}`])} /></section>
+        <section id="admin-errors"><AdminTable
+          icon={<AlertTriangle size={17} />} title="Ошибки обработки" headers={["Тип", "Статус", "Пользователь/тест", "Сообщение", "Действие"]}
+          rows={failedJobs.map((item) => [formatJobKind(item.kind), formatJobStatus(item.status), item.user_email || item.test_title || item.aggregate_id || "-", formatProcessingError(item.error_message), <button key={item.id} className="secondary" onClick={() => onRetryFailedJob(item)}><RefreshCw size={15} /> Повторить</button>])}
           emptyText="Ошибок обработки нет."
-        />
+        /></section>
+        <section id="admin-audit"><AdminTable
+          icon={<Shield size={17} />} title="Audit log" headers={["Время", "Кто", "Действие", "Сущность"]}
+          rows={auditLogs.map((item) => [new Date(item.created_at).toLocaleString("ru-RU"), item.actor_email || "Система", item.action, `${item.entity_type}${item.entity_id ? ` · ${item.entity_id.slice(0, 8)}` : ""}`])}
+          emptyText="Журнал действий пока пуст."
+        /></section>
       </div>
     </section>
   );

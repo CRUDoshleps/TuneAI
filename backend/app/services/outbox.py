@@ -9,6 +9,7 @@ from app.models import OutboxEvent, OutboxStatusEnum
 
 ANSWER_UPLOADED = "answer.uploaded"
 MATERIAL_UPLOADED = "material.uploaded"
+SOURCE_GENERATION_REQUESTED = "source.generation_requested"
 
 
 def add_outbox_event(db: Session, event_type: str, aggregate_id: str, payload: dict[str, Any]) -> OutboxEvent:

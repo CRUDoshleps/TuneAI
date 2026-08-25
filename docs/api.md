@@ -62,6 +62,19 @@ Header: Idempotency-Key: <client-generated-key>
 
 Текстовые ответы пропускают SpeechKit и сразу идут в RAG-поиск и AI-оценку.
 
+Ответ на вопрос с одиночным или множественным выбором:
+
+```text
+POST /attempts/{attempt_id}/questions/{question_id}/choices
+Header: Idempotency-Key: <client-generated-key>
+
+{
+  "selected_option_ids": ["stable-option-id"]
+}
+```
+
+Закрытые вопросы проверяются детерминированно и не отправляются AI-провайдеру. `question_type` принимает `open_response`, `single_choice` или `multiple_choice`.
+
 Если вопрос имеет `answer_mode=audio`, endpoint текстового ответа вернет `403` с `Text answers are disabled for this question`.
 
 Если вопрос имеет `answer_mode=text`, endpoint аудиоответа вернет `403` с `Audio answers are disabled for this question`.
@@ -120,6 +133,28 @@ POST /tests/{test_id}/assign-group
 `POST /tests/{test_id}/generate-questions` создает кандидатов вопросов из индексированных RAG-материалов. Ответ содержит вопросы, оценку новизны, фрагмент источника, расчетный token budget и признак reuse.
 
 `POST /tests/{test_id}/calibration-preview` прогоняет выбранный AI-скилл на примерах ответов до публикации теста. Это помогает преподавателю увидеть, как модель оценит сильный, средний и слабый ответ.
+
+## Импорт презентации
+
+```text
+POST /source-imports/upload?test_id={test_id}
+GET /source-imports?test_id={test_id}
+GET /source-imports/{source_id}
+POST /source-imports/{source_id}/generate
+POST /source-imports/{source_id}/candidates/{candidate_id}/accept
+```
+
+Upload принимает PPTX или PDF до 25 МБ. Ответ сохраняет границы слайдов/страниц и заметки докладчика. Генерация выполняется через outbox/worker; клиент опрашивает `GET /source-imports/{source_id}` до статуса `completed` или `failed`.
+
+## Операционная админка
+
+```text
+GET /admin/audit-log
+GET /admin/results/export.csv
+POST /admin/failed-jobs/{job_id}/retry
+```
+
+CSV возвращается с UTF-8 BOM для корректного открытия кириллицы в Excel. Повторный запуск идемпотентен: если задача уже стоит в очереди, дубликат outbox-события не создаётся.
 
 ## Материалы
 

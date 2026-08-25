@@ -10,6 +10,11 @@ cd "$ROOT_DIR"
 
 cleanup() {
   local status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "Moodle E2E failed; collecting service diagnostics" >&2
+    "${COMPOSE[@]}" ps >&2 || true
+    "${COMPOSE[@]}" logs --tail=200 postgres rabbitmq backend worker moodle-postgres moodle >&2 || true
+  fi
   if [ "${KEEP_MOODLE_E2E:-0}" != "1" ]; then
     "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
   fi

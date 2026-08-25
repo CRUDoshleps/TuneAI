@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api import admin, admin_ai, analytics, attempts, auth, groups, materials, moodle, public, skills, tests, users
+from app.api import admin, admin_ai, analytics, attempts, auth, groups, materials, moodle, public, skills, source_imports, tests, users
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal, get_db, init_db
@@ -131,6 +131,7 @@ app.include_router(skills.router)
 app.include_router(tests.router)
 app.include_router(attempts.router)
 app.include_router(materials.router)
+app.include_router(source_imports.router)
 app.include_router(moodle.router)
 app.include_router(admin.router)
 app.include_router(admin_ai.router)

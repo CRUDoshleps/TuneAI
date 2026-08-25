@@ -5,6 +5,9 @@ export type TestStatus = "draft" | "published" | "archived";
 export type TestType = "exam" | "self_training" | "interview";
 export type QuestionCompetency = { name: string; weight: number };
 export type QuestionAnswerMode = "audio" | "text" | "both";
+export type QuestionType = "open_response" | "single_choice" | "multiple_choice";
+export type QuestionOption = { id: string; text: string };
+export type SourceReference = { source_import_id?: string | null; segment_id: string; label: string };
 export type RubricCriterion = { name: string; weight: number };
 export type AnswerStatus =
   | "uploaded"
@@ -80,6 +83,11 @@ export type Question = {
   id: string;
   text: string;
   expected_answer: string;
+  question_type: QuestionType;
+  options: QuestionOption[];
+  correct_option_ids: string[];
+  explanation: string;
+  source_refs: SourceReference[];
   competencies: QuestionCompetency[];
   answer_mode: QuestionAnswerMode;
   order_index: number;
@@ -89,6 +97,8 @@ export type Question = {
 export type AttemptQuestion = {
   id: string;
   text: string;
+  question_type: QuestionType;
+  options: QuestionOption[];
   competencies: QuestionCompetency[];
   answer_mode: QuestionAnswerMode;
   order_index: number;
@@ -134,9 +144,10 @@ export type AISkill = {
 export type Answer = {
   id: string;
   question_id: string;
-  answer_type: "audio" | "text";
+  answer_type: "audio" | "text" | "choice";
   status: AnswerStatus;
   text_response: string | null;
+  selected_option_ids: string[];
   transcript: string | null;
   evaluation: Evaluation | null;
   score: number | null;
@@ -159,7 +170,7 @@ export type AttemptResult = {
     answer_id: string;
     question_id: string;
     status: AnswerStatus;
-    answer_type: "audio" | "text";
+    answer_type: "audio" | "text" | "choice";
     transcript: string | null;
     score: number | null;
     max_score: number | null;
@@ -242,6 +253,11 @@ export type MaterialPolicy = "test_and_question" | "question_only" | "course_lib
 export type GeneratedQuestionCandidate = {
   text: string;
   expected_answer: string;
+  question_type: QuestionType;
+  options: QuestionOption[];
+  correct_option_ids: string[];
+  explanation: string;
+  source_refs: SourceReference[];
   competencies: QuestionCompetency[];
   answer_mode: QuestionAnswerMode;
   max_score: number;
@@ -281,6 +297,36 @@ export type AdminDashboard = {
   answers_completed: number;
   answers_failed: number;
   outbox_pending: number;
+  attempts_completed: number;
+  average_score_percent: number;
+  review_pending: number;
+};
+
+export type SourceImport = {
+  id: string;
+  test_id: string;
+  owner_id: string;
+  source_filename: string;
+  content_type: string;
+  status: "uploaded" | "ready" | "queued" | "generating" | "completed" | "failed";
+  segments: Array<{ id: string; index: number; title: string; text: string; notes: string }>;
+  excluded_segment_ids: string[];
+  generation_config: Record<string, unknown>;
+  candidates: Array<GeneratedQuestionCandidate & { id: string; status: "pending" | "accepted"; question_id?: string }>;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AuditLog = {
+  id: string;
+  actor_id: string | null;
+  actor_email: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  details: Record<string, unknown>;
+  created_at: string;
 };
 
 export type AdminAttempt = {
@@ -515,6 +561,14 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, token
     return undefined as T;
   }
   return censorContent((await response.json()) as T);
+}
+
+export async function apiDownload(path: string, token?: string): Promise<Blob> {
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_BASE}${path}`, { headers, cache: "no-store" });
+  if (!response.ok) throw new ApiError(response.status, statusMessages[response.status] || "Не удалось скачать файл");
+  return response.blob();
 }
 
 export { API_BASE };
