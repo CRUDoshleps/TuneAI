@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 from passlib.context import CryptContext
 
 from app.core.config import get_settings
@@ -34,7 +35,7 @@ def decode_token(token: str, expected_type: Literal["access", "refresh"] = "acce
     settings = get_settings()
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-    except JWTError as exc:
+    except InvalidTokenError as exc:
         raise ValueError("Invalid token") from exc
     if payload.get("type") != expected_type:
         raise ValueError("Invalid token type")
@@ -42,4 +43,3 @@ def decode_token(token: str, expected_type: Literal["access", "refresh"] = "acce
     if not subject:
         raise ValueError("Token subject is missing")
     return str(subject)
-
