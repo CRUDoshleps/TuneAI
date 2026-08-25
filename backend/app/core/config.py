@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "local"
+    app_revision: str = "development"
     secret_key: str = Field(default="dev-secret-change-me", min_length=16)
     docs_enabled: bool = True
     metrics_enabled: bool = True
@@ -30,6 +31,8 @@ class Settings(BaseSettings):
     demo_bootstrap_ttl_hours: int = 24
     moodle_integration_enabled: bool = False
     moodle_integration_token: str | None = None
+    moodle_integration_site_id: str = "default"
+    moodle_integration_owner_emails: Annotated[list[str], NoDecode] = []
 
     database_url: str = "sqlite:///./tuneai.db"
 
@@ -111,7 +114,14 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    @field_validator("cors_origins", "allowed_audio_types", "test_creator_roles", "answer_reviewer_roles", mode="before")
+    @field_validator(
+        "cors_origins",
+        "allowed_audio_types",
+        "test_creator_roles",
+        "answer_reviewer_roles",
+        "moodle_integration_owner_emails",
+        mode="before",
+    )
     @classmethod
     def split_csv_or_json(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
@@ -148,6 +158,13 @@ class Settings(BaseSettings):
             errors.append("YANDEX_MOCK must be false")
         if self.demo_bootstrap_enabled:
             errors.append("DEMO_BOOTSTRAP_ENABLED must be false")
+        if self.moodle_integration_enabled:
+            if not self.moodle_integration_token or len(self.moodle_integration_token) < 32:
+                errors.append("MOODLE_INTEGRATION_TOKEN must contain at least 32 characters")
+            if not self.moodle_integration_site_id.strip() or self.moodle_integration_site_id == "default":
+                errors.append("MOODLE_INTEGRATION_SITE_ID must identify the trusted Moodle instance")
+            if not self.moodle_integration_owner_emails:
+                errors.append("MOODLE_INTEGRATION_OWNER_EMAILS must scope tests exposed to Moodle")
         if not self.runtime_ai_provider_config_enabled and not (self.yandex_api_key or self.yandex_iam_token):
             errors.append("Yandex credentials are required")
         if not self.runtime_ai_provider_config_enabled and not self.yandex_folder_id:

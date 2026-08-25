@@ -1,4 +1,6 @@
 <?php
+// This file is part of Moodle - http://moodle.org/. Licensed under GNU GPL v3 or later.
+
 namespace local_tuneai;
 
 defined('MOODLE_INTERNAL') || die();
@@ -10,6 +12,7 @@ class question_reader {
         $answer = $this->latest_answer_text($questionattemptid);
         return [
             'questionattemptid' => $questionattemptid,
+            'questionusageid' => (int) $attempt->questionusageid,
             'questionid' => (int) $attempt->questionid,
             'questiontext' => trim((string) ($attempt->questionsummary ?? '')),
             'answertext' => $answer !== '' ? $answer : trim((string) ($attempt->responsesummary ?? '')),

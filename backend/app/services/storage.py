@@ -16,6 +16,8 @@ class StorageService:
             raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported audio type")
         if len(content) > self.settings.max_upload_bytes:
             raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Audio file is too large")
+        if not self._matches_audio_signature(normalized_type, content):
+            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Audio content does not match its type")
 
     def save_audio(self, answer_id: str, upload: UploadFile, content: bytes) -> str:
         self.validate_upload(upload, content)
@@ -24,6 +26,20 @@ class StorageService:
         if self.settings.storage_backend == "s3":
             return self._save_s3(object_key, upload.content_type or "application/octet-stream", content)
         return self._save_local(object_key, content)
+
+    @staticmethod
+    def _matches_audio_signature(content_type: str, content: bytes) -> bool:
+        if content_type == "audio/webm":
+            return content.startswith(b"\x1a\x45\xdf\xa3")
+        if content_type == "audio/ogg":
+            return content.startswith(b"OggS")
+        if content_type in {"audio/wav", "audio/x-wav"}:
+            return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WAVE"
+        if content_type == "audio/mpeg":
+            return content.startswith(b"ID3") or (len(content) >= 2 and content[0] == 0xFF and content[1] & 0xE0 == 0xE0)
+        if content_type == "audio/mp4":
+            return len(content) >= 12 and content[4:8] == b"ftyp"
+        return False
 
     def read_audio(self, object_key: str) -> bytes:
         if self.settings.storage_backend == "s3":

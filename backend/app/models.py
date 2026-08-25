@@ -291,9 +291,12 @@ class Attempt(Base):
 
 class MoodleSubmission(Base):
     __tablename__ = "moodle_submissions"
-    __table_args__ = (UniqueConstraint("external_submission_id", name="uq_moodle_external_submission_id"),)
+    __table_args__ = (
+        UniqueConstraint("moodle_site_id", "external_submission_id", name="uq_moodle_site_external_submission"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    moodle_site_id: Mapped[str] = mapped_column(String(120), nullable=False, default="default", index=True)
     external_submission_id: Mapped[str] = mapped_column(String(255), nullable=False)
     external_attempt_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     moodle_user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
@@ -307,7 +310,26 @@ class MoodleSubmission(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     attempt_id: Mapped[str] = mapped_column(ForeignKey("attempts.id"), nullable=False)
     answer_id: Mapped[str] = mapped_column(ForeignKey("answers.id"), nullable=False)
+    reviewer_moodle_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reviewer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class MoodleUserLink(Base):
+    __tablename__ = "moodle_user_links"
+    __table_args__ = (
+        UniqueConstraint("moodle_site_id", "moodle_user_id", name="uq_moodle_site_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    moodle_site_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    moodle_user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Answer(Base):

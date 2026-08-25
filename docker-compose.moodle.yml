@@ -10,12 +10,14 @@ services:
     environment:
       MOODLE_INTEGRATION_ENABLED: "true"
       MOODLE_INTEGRATION_TOKEN: tuneai-moodle-e2e-token
+      MOODLE_INTEGRATION_SITE_ID: tuneai-moodle-e2e
       YANDEX_MOCK: "true"
 
   worker:
     environment:
       MOODLE_INTEGRATION_ENABLED: "true"
       MOODLE_INTEGRATION_TOKEN: tuneai-moodle-e2e-token
+      MOODLE_INTEGRATION_SITE_ID: tuneai-moodle-e2e
       YANDEX_MOCK: "true"
 
   moodle-postgres:

@@ -2,6 +2,8 @@
 
 Moodle local plugin для связи Moodle activity/question с TuneAI backend.
 
+Текущая версия: `1.0.0`, `MATURITY_STABLE`, Moodle 4.0+.
+
 Пользователь не вводит логин и пароль TuneAI. Moodle уже знает пользователя, поэтому плагин отправляет в TuneAI `moodle_user_id`, email, имя, course id, activity id и mapping на TuneAI test/question. TuneAI создает или находит связанного examinee, проверяет ответ и возвращает результат. Плагин сохраняет локальное зеркало результата и может записать оценку в Moodle Gradebook.
 
 ## Установка
@@ -31,6 +33,7 @@ php admin/cli/upgrade.php --non-interactive
 - `Enable TuneAI`;
 - `TuneAI base URL`;
 - `TuneAI integration key`;
+- `Moodle site identifier` — стабильное уникальное значение для этой установки;
 - `Write grades to Moodle gradebook`;
 - `Request timeout`.
 
@@ -39,6 +42,8 @@ php admin/cli/upgrade.php --non-interactive
 ```env
 MOODLE_INTEGRATION_ENABLED=true
 MOODLE_INTEGRATION_TOKEN=<same-service-token>
+MOODLE_INTEGRATION_SITE_ID=<same-stable-site-id>
+MOODLE_INTEGRATION_OWNER_EMAILS=methodist@example.edu
 ```
 
 Service token хранится только в Moodle backend и TuneAI backend. Браузер студента его не получает.
@@ -51,7 +56,10 @@ Service token хранится только в Moodle backend и TuneAI backend.
 - сохраняет `external_submission_id`, TuneAI attempt id, answer id, статус, score, grade, feedback и teacher signal;
 - забирает готовый результат из TuneAI;
 - записывает оценку в Moodle Gradebook через manual grade item;
-- поддерживает idempotent повторную отправку через stable `external_submission_id`.
+- не публикует AI-оценку, пока `teacher_signal` требует ручной проверки;
+- позволяет преподавателю проверить балл и feedback непосредственно в Moodle;
+- поддерживает idempotent повторную отправку и отдельные попытки пересдачи;
+- реализует Moodle Privacy API для экспорта и удаления локальных данных.
 
 ## Основные классы
 
@@ -62,6 +70,7 @@ Service token хранится только в Moodle backend и TuneAI backend.
 - `gradebook_service`: запись проверенного результата в Moodle Gradebook.
 - `task/sync_submissions`: scheduled polling pending submissions с backoff.
 - `manage.php`: страница проверки соединения, manifest и mapping.
+- `index.php`, `take.php`, `result.php`, `results.php`: страницы заданий, ответа, результата и сводки преподавателя.
 - `upload_audio.php`: endpoint Moodle, который принимает запись из браузера и отправляет ее в TuneAI.
 - `templates/recorder.mustache` и `amd/src/recorder.js`: простой recorder UI на MediaRecorder.
 
@@ -75,7 +84,7 @@ Service token хранится только в Moodle backend и TuneAI backend.
 ```json
 {
   "external_submission_id": "course-10-cm-7-qa-22-user-42",
-  "external_attempt_id": "moodle-cm-7-user-42",
+  "external_attempt_id": "moodle-quba-1234-user-42",
   "moodle_user_id": "42",
   "moodle_course_id": "10",
   "moodle_activity_id": "7",
@@ -89,7 +98,8 @@ Service token хранится только в Moodle backend и TuneAI backend.
 
 5. TuneAI возвращает queued status.
 6. Scheduled task или ручной вызов `refresh_submission_result()` забирает готовый result.
-7. Если `gradesync` включен, результат записывается в Moodle Gradebook.
+7. Если ручная проверка не нужна, результат записывается в Moodle Gradebook.
+8. При `review_recommended` преподаватель подтверждает итоговый балл в Moodle, после чего он публикуется в Gradebook.
 
 ## Voice flow
 
@@ -134,7 +144,7 @@ $repository->upsert_mapping(
 );
 ```
 
-Если `groupid` задан, mapping применяется только к группе. Если группового mapping нет, плагин использует общий mapping с `groupid = null`.
+Если `groupid` задан, mapping применяется только к группе. Если группового mapping нет, плагин использует общий mapping с внутренним `groupid = 0`.
 
 ## Gradebook
 
@@ -143,7 +153,7 @@ $repository->upsert_mapping(
 ```text
 itemtype=manual
 iteminstance=<cmid>
-itemnumber=<questionattemptid или hash TuneAI question id>
+itemnumber=<stable hash TuneAI question id>
 ```
 
 `finalgrade` равен `score`, а `grademax` равен `max_score`, который вернул TuneAI. Feedback сохраняется в grade feedback.
@@ -156,4 +166,4 @@ itemnumber=<questionattemptid или hash TuneAI question id>
 tests/moodle/run-moodle-e2e.sh
 ```
 
-Smoke поднимает TuneAI и Moodle в Docker, устанавливает плагин, создает mapping, отправляет ответ от Moodle-пользователя, дожидается результата и проверяет Gradebook.
+Smoke поднимает TuneAI и Moodle в Docker, устанавливает плагин, создает mapping, отправляет ответ от Moodle-пользователя, проверяет пересдачу, блокировку provisional AI grade и публикацию оценки после ручной проверки.

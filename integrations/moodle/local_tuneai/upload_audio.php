@@ -1,11 +1,15 @@
 <?php
+// This file is part of Moodle - http://moodle.org/. Licensed under GNU GPL v3 or later.
+
 require_once(__DIR__ . '/../../config.php');
+require_once($CFG->dirroot . '/group/lib.php');
 
 $courseid = required_param('courseid', PARAM_INT);
 $cmid = required_param('cmid', PARAM_INT);
 $questionid = required_param('questionid', PARAM_INT);
 $groupid = optional_param('groupid', null, PARAM_INT);
 $externalsubmissionid = optional_param('external_submission_id', '', PARAM_TEXT);
+$externalattemptid = optional_param('external_attempt_id', '', PARAM_TEXT);
 
 require_sesskey();
 $cm = get_coursemodule_from_id('', $cmid, $courseid, false, MUST_EXIST);
@@ -16,6 +20,15 @@ require_capability('local/tuneai:submit', $context);
 header('Content-Type: application/json; charset=utf-8');
 
 try {
+    if ($groupid !== null) {
+        $group = groups_get_group($groupid);
+        if (!$group || (int) $group->courseid !== $courseid) {
+            throw new moodle_exception('Invalid Moodle group');
+        }
+        if (!groups_is_member($groupid, $USER->id) && !has_capability('local/tuneai:manage', $context)) {
+            throw new required_capability_exception($context, 'local/tuneai:submit', 'nopermissions', '');
+        }
+    }
     if (empty($_FILES['audio']) || !is_uploaded_file($_FILES['audio']['tmp_name'])) {
         throw new moodle_exception('Audio file is required');
     }
@@ -42,7 +55,8 @@ try {
         (string) ($file['name'] ?: 'answer.webm'),
         $contenttype,
         $groupid,
-        $externalsubmissionid !== '' ? $externalsubmissionid : null
+        $externalsubmissionid !== '' ? $externalsubmissionid : null,
+        $externalattemptid !== '' ? $externalattemptid : null
     );
     echo json_encode(['ok' => true, 'result' => $result], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $exception) {

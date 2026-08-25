@@ -21,19 +21,22 @@ Moodle может:
 ```env
 MOODLE_INTEGRATION_ENABLED=true
 MOODLE_INTEGRATION_TOKEN=<shared-service-token>
+MOODLE_INTEGRATION_SITE_ID=<stable-unique-moodle-site-id>
+MOODLE_INTEGRATION_OWNER_EMAILS=methodist@example.edu
 ```
 
 Каждый запрос должен передавать header:
 
 ```text
 X-TuneAI-Integration-Key: <shared-service-token>
+X-TuneAI-Moodle-Site: <stable-unique-moodle-site-id>
 ```
 
 Service token хранится только на стороне Moodle или интеграционного backend. Не передавайте его в браузер студента.
 
 ![TuneAI API endpoints для Moodle](screenshots/moodle-swagger-endpoints.png)
 
-## Установка заготовки плагина в чужой Moodle
+## Установка плагина в Moodle
 
 1. Скопируйте каталог `integrations/moodle/local_tuneai` в Moodle как `local/tuneai`.
 2. Откройте админку Moodle и завершите установку local plugin.
@@ -41,6 +44,7 @@ Service token хранится только на стороне Moodle или и
    - `Enable TuneAI`;
    - `TuneAI base URL`;
    - `TuneAI integration key`;
+   - `Moodle site identifier`;
    - `Write grades to Moodle gradebook`;
    - `Request timeout`.
 4. На стороне TuneAI включите:
@@ -48,9 +52,11 @@ Service token хранится только на стороне Moodle или и
 ```env
 MOODLE_INTEGRATION_ENABLED=true
 MOODLE_INTEGRATION_TOKEN=<same-service-token>
+MOODLE_INTEGRATION_SITE_ID=<same-stable-site-id>
+MOODLE_INTEGRATION_OWNER_EMAILS=methodist@example.edu
 ```
 
-Заготовка содержит:
+Плагин содержит:
 
 - таблицу `local_tuneai_map` для mapping Moodle course/activity/question/group -> TuneAI test/question/methodist;
 - таблицу `local_tuneai_submission` для зеркала статуса проверки;
@@ -60,6 +66,7 @@ MOODLE_INTEGRATION_TOKEN=<same-service-token>
 - `submission_service.php` для отправки текстового или голосового ответа в TuneAI и polling результата;
 - `gradebook_service.php` для записи проверенного результата в Moodle Gradebook;
 - `/local/tuneai/manage.php` для проверки соединения, чтения manifest и сохранения mapping;
+- `/local/tuneai/index.php`, `take.php`, `result.php` и `results.php` для прохождения и просмотра результатов;
 - scheduled task `local_tuneai\task\sync_submissions` для polling незавершенных submissions;
 - `upload_audio.php`, `templates/recorder.mustache`, `amd/src/recorder.js` для записи голоса через браузер и безопасной отправки через Moodle backend.
 
@@ -70,7 +77,7 @@ MOODLE_INTEGRATION_TOKEN=<same-service-token>
 - Moodle course id;
 - Moodle activity id, например quiz, assignment или custom activity;
 - Moodle question id или slot id;
-- Moodle group id, если один и тот же вопрос в разных группах должен вести в разные TuneAI тесты;
+- Moodle group id, если один и тот же вопрос в разных группах должен вести в разные TuneAI тесты (для общей связки хранится `0`);
 - TuneAI `test_id`;
 - TuneAI `question_id`;
 - политика ручной проверки при `teacher_signal`.
@@ -158,9 +165,9 @@ Moodle-плагин должен запросить доступ к микроф
 6. TuneAI сохраняет файл, ставит outbox job и возвращает текущее состояние submission.
 
 Не отправляйте `X-TuneAI-Integration-Key` напрямую из браузера. Браузер должен общаться с Moodle backend, а Moodle backend уже вызывает TuneAI.
-Заготовка endpoint принимает аудио до 25 MB в форматах `webm`, `ogg`, `mpeg`, `mp4`, `wav`.
+Endpoint принимает аудио до 25 MB в форматах `webm`, `ogg`, `mpeg`, `mp4`, `wav` и проверяет сигнатуру содержимого.
 
-Recorder UI в заготовке подключается так:
+Recorder UI подключается так:
 
 ```php
 echo $OUTPUT->render_from_template('local_tuneai/recorder', [
@@ -192,7 +199,7 @@ GET /integrations/moodle/submissions/{external_submission_id}/result
 - `review_reason`: причина сигнала для преподавателя;
 - `confidence`: уверенность AI.
 
-Moodle должен выставлять `grade` или `score/max_score` в Gradebook только при `result_ready=true`. Если `teacher_signal != "none"`, Moodle может сохранить AI-результат, но должен пометить работу для ручной проверки преподавателем.
+Moodle выставляет `score/max_score` в Gradebook только при `result_ready=true` и `teacher_signal="none"`. AI-результат с другим сигналом сохраняется как provisional и показывается преподавателю, но не становится итоговой оценкой.
 
 `local_tuneai` делает это через `submission_service::refresh_submission_result()`. Метод обновляет локальную запись `local_tuneai_submission` и, если включен `gradesync`, вызывает `gradebook_service`.
 
@@ -208,9 +215,13 @@ if result_ready=true and teacher_signal=none:
   write grade and feedback to Gradebook
 
 if result_ready=true and teacher_signal!=none:
-  write provisional grade
-  mark submission for teacher review
+  do not write grade
+  mark submission for teacher review in Moodle
   show review_reason to teacher
+
+if teacher approves score and feedback:
+  send audited Moodle review to TuneAI
+  write reviewed score to Gradebook
 ```
 
 ## Рекомендуемый flow
@@ -219,8 +230,9 @@ if result_ready=true and teacher_signal!=none:
 2. Студент надиктовывает ответ в Moodle или отправляет текст.
 3. Moodle отправляет ответ в TuneAI со стабильным `external_submission_id`.
 4. Moodle опрашивает result endpoint.
-5. Moodle записывает оценку и feedback.
-6. Moodle ставит сигнал преподавателю, если `review_required=true`.
+5. Moodle ставит сигнал преподавателю, если `review_required=true`.
+6. Преподаватель подтверждает итоговый балл и feedback на странице результата.
+7. Moodle записывает только финальную оценку в Gradebook.
 
 TuneAI принимает submissions только для опубликованных тестов.
 
@@ -234,11 +246,13 @@ TuneAI принимает submissions только для опубликован
 - Сохраняет локальное зеркало submission/result.
 - Забирает готовый result и записывает score/feedback в Moodle Gradebook.
 - Запускает scheduled polling pending submissions.
+- Показывает задания студенту, сводку ответов преподавателю и форму ручной проверки.
+- Экспортирует и удаляет локальные пользовательские данные через Moodle Privacy API.
 
-## Что остается для UI уровня
+## Ограничения интеграции
 
-- Teacher view: показать `teacher_signal`, `review_reason`, confidence и AI feedback.
 - Более удобное автоматическое чтение Moodle question id из конкретных activity.
+- Mapping на стандартные Quiz/Assignment пока настраивается преподавателем через страницу плагина.
 
 ## E2E-проверка с Moodle в Docker
 
@@ -259,9 +273,11 @@ tests/moodle/run-moodle-e2e.sh
 - создает Moodle course/user и mapping;
 - отправляет текстовый Moodle submission через классы plugin;
 - проверяет idempotency повтора;
+- проверяет отдельную попытку пересдачи;
 - дожидается результата через scheduled task plugin;
 - валидирует `score`, `max_score`, `grade`, `feedback`, `confidence` и `teacher_signal`;
-- проверяет запись оценки в `grade_items` и `grade_grades`.
+- проверяет, что provisional AI score не попал в журнал;
+- выполняет ручную проверку и затем проверяет запись оценки в `grade_items` и `grade_grades`.
 
 После успешного или неуспешного прогона runner удаляет контейнеры и volumes. Чтобы оставить окружение для ручной диагностики:
 

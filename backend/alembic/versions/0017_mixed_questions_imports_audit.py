@@ -5,8 +5,8 @@ from alembic import op
 
 
 # Alembic's default version_num column is VARCHAR(32).
-revision: str = "0016_mixed_questions_import"
-down_revision: str | None = "0015_invites_and_admin_health"
+revision: str = "0017_mixed_questions_import"
+down_revision: str | None = "0016_moodle_production_hardening"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

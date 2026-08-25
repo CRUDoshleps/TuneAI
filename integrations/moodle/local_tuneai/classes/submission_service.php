@@ -1,4 +1,6 @@
 <?php
+// This file is part of Moodle - http://moodle.org/. Licensed under GNU GPL v3 or later.
+
 namespace local_tuneai;
 
 defined('MOODLE_INTERNAL') || die();
@@ -18,7 +20,17 @@ class submission_service {
 
     public function submit_question_attempt(int $courseid, int $cmid, int $questionattemptid, int $userid, ?int $groupid = null): array {
         $qa = $this->reader->read_question_attempt($questionattemptid);
-        return $this->submit_text_answer($courseid, $cmid, $qa['questionid'], $userid, $qa['answertext'], $groupid, $this->external_submission_id($courseid, $cmid, $questionattemptid, $userid, $groupid), $questionattemptid);
+        return $this->submit_text_answer(
+            $courseid,
+            $cmid,
+            $qa['questionid'],
+            $userid,
+            $qa['answertext'],
+            $groupid,
+            $this->external_submission_id($courseid, $cmid, $questionattemptid, $userid, $groupid),
+            $questionattemptid,
+            'moodle-quba-' . $qa['questionusageid'] . '-user-' . $userid
+        );
     }
 
     public function submit_text_answer(
@@ -29,7 +41,8 @@ class submission_service {
         string $answertext,
         ?int $groupid = null,
         ?string $externalsubmissionid = null,
-        ?int $questionattemptid = null
+        ?int $questionattemptid = null,
+        ?string $externalattemptid = null
     ): array {
         global $DB;
         $mapping = $this->repository->find_mapping($courseid, $cmid, $questionid, $groupid);
@@ -42,9 +55,10 @@ class submission_service {
             $group = $DB->get_record('groups', ['id' => $groupid]);
             $groupname = $group ? $group->name : null;
         }
+        $submissionid = $externalsubmissionid ?: $this->external_text_submission_id($courseid, $cmid, $questionid, $userid, $groupid);
         $payload = [
-            'external_submission_id' => $externalsubmissionid ?: $this->external_text_submission_id($courseid, $cmid, $questionid, $userid, $groupid),
-            'external_attempt_id' => 'moodle-cm-' . $cmid . '-user-' . $userid,
+            'external_submission_id' => $submissionid,
+            'external_attempt_id' => $externalattemptid ?: 'moodle-submission-' . $submissionid,
             'moodle_user_id' => (string) $userid,
             'moodle_course_id' => (string) $courseid,
             'moodle_activity_id' => (string) $cmid,
@@ -82,7 +96,8 @@ class submission_service {
         string $filename,
         string $contenttype,
         ?int $groupid = null,
-        ?string $externalsubmissionid = null
+        ?string $externalsubmissionid = null,
+        ?string $externalattemptid = null
     ): array {
         global $DB;
         $mapping = $this->repository->find_mapping($courseid, $cmid, $questionid, $groupid);
@@ -98,7 +113,7 @@ class submission_service {
         $submissionid = $externalsubmissionid ?: $this->external_audio_submission_id($courseid, $cmid, $questionid, $userid, $groupid);
         $payload = [
             'external_submission_id' => $submissionid,
-            'external_attempt_id' => 'moodle-cm-' . $cmid . '-user-' . $userid,
+            'external_attempt_id' => $externalattemptid ?: 'moodle-submission-' . $submissionid,
             'moodle_user_id' => (string) $userid,
             'moodle_course_id' => (string) $courseid,
             'moodle_activity_id' => (string) $cmid,
@@ -129,6 +144,39 @@ class submission_service {
             throw new \moodle_exception('TuneAI submission was not found in Moodle');
         }
         $result = $this->client->result($externalsubmissionid);
+        $updated = $this->repository->save_submission($result, [
+            'courseid' => (int) $submission->courseid,
+            'cmid' => (int) $submission->cmid,
+            'questionattemptid' => $submission->questionattemptid !== null ? (int) $submission->questionattemptid : null,
+            'userid' => (int) $submission->userid,
+            'groupid' => $submission->groupid !== null ? (int) $submission->groupid : null,
+            'tuneai_test_id' => $submission->tuneai_test_id,
+            'tuneai_question_id' => $submission->tuneai_question_id,
+        ]);
+        $gradesync = $this->gradebook->sync_result($result, $updated);
+        if ($gradesync !== null) {
+            $result['moodle_grade_sync'] = $gradesync;
+        }
+        return $result;
+    }
+
+    public function review_submission(
+        string $externalsubmissionid,
+        float $score,
+        string $feedback,
+        int $reviewerid,
+        string $reviewername
+    ): array {
+        $submission = $this->repository->find_submission($externalsubmissionid);
+        if (!$submission) {
+            throw new \moodle_exception('TuneAI submission was not found in Moodle');
+        }
+        $result = $this->client->review($externalsubmissionid, [
+            'score' => $score,
+            'feedback' => $feedback,
+            'reviewer_moodle_user_id' => (string) $reviewerid,
+            'reviewer_name' => $reviewername,
+        ]);
         $updated = $this->repository->save_submission($result, [
             'courseid' => (int) $submission->courseid,
             'cmid' => (int) $submission->cmid,
