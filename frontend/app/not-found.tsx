@@ -1,11 +1,12 @@
 import Link from "next/link";
+import BrandMark from "../components/BrandMark";
 
 export default function NotFound() {
   return (
     <main className="shell auth-shell">
       <section className="landing-card not-found-card">
         <header className="landing-nav">
-          <div className="logo-word">TuneAI</div>
+          <div className="logo-word"><BrandMark />TuneAI</div>
           <Link className="nav-pill" href="/">На главную</Link>
         </header>
 

@@ -48,6 +48,7 @@ Repository variables:
 | `NEXT_PUBLIC_TUNEAI_TEMPLATE` | Публичный UI template |
 | `NEXT_PUBLIC_TUNEAI_PRODUCT_NAME` | Публичное название продукта |
 | `NEXT_PUBLIC_TUNEAI_*` | Остальная публичная branding-конфигурация при необходимости |
+| `NEXT_PUBLIC_YANDEX_METRIKA_ID` | Числовой ID счетчика Яндекс Метрики; пустое значение отключает аналитику |
 
 GitHub Secrets не требуются. Service account имеет только
 `container-registry.images.pusher` на двух TuneAI repositories. Federation

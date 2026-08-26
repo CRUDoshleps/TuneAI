@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Golos_Text } from "next/font/google";
+import YandexMetrika from "../components/YandexMetrika";
 import { platformConfig } from "../lib/platform-config";
 import "./styles.css";
 
@@ -17,7 +18,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ru">
-      <body className={golosText.variable}>{children}</body>
+      <body className={golosText.variable}>
+        {children}
+        <YandexMetrika />
+      </body>
     </html>
   );
 }

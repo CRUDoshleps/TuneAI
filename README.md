@@ -117,6 +117,7 @@ NEXT_PUBLIC_TUNEAI_SURFACE_COLOR=#fffdf4
 NEXT_PUBLIC_TUNEAI_PANEL_COLOR=#ffffff
 NEXT_PUBLIC_TUNEAI_TEXT_COLOR=#111111
 NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL=help@example.com
+NEXT_PUBLIC_YANDEX_METRIKA_ID=
 TEST_CREATOR_ROLES=teacher,interviewer,admin
 ANSWER_REVIEWER_ROLES=teacher,admin
 ```
@@ -129,6 +130,20 @@ ANSWER_REVIEWER_ROLES=teacher,admin
 docker compose build frontend
 docker compose up -d
 ```
+
+### Яндекс Метрика и конверсии
+
+Создайте счетчик в Яндекс Метрике, добавьте его числовой ID в `NEXT_PUBLIC_YANDEX_METRIKA_ID` и пересоберите frontend. При пустом значении счетчик и пиксель не добавляются в страницу.
+
+В интерфейсе Метрики создайте цели типа «JavaScript-событие» с идентификаторами:
+
+- `tuneai-demo-open` — посетитель открыл демонстрацию;
+- `tuneai-demo-start` — пробный сценарий успешно подготовлен;
+- `tuneai-consultation` — посетитель нажал «Обсудить внедрение»;
+- `ym-register` — аккаунт успешно создан;
+- `ym-login` — пользователь успешно вошел.
+
+Счетчик включает карту кликов, переходы по внешним ссылкам и точный показатель отказов. Вебвизор намеренно выключен, чтобы не записывать формы входа и учебные ответы. Перед включением счетчика добавьте аналитику в политику конфиденциальности и настройте согласие, если оно требуется для вашего сайта.
 
 Секреты Yandex AI Studio, базы данных, RabbitMQ, S3/MinIO и service-интеграций остаются только на backend и worker. Не передавайте их во frontend.
 

@@ -294,6 +294,7 @@ jobs:
           NEXT_PUBLIC_TUNEAI_SUCCESS_COLOR: ${{ vars.NEXT_PUBLIC_TUNEAI_SUCCESS_COLOR }}
           NEXT_PUBLIC_TUNEAI_EMBED_ALLOWED_ORIGINS: ${{ vars.NEXT_PUBLIC_TUNEAI_EMBED_ALLOWED_ORIGINS }}
           NEXT_PUBLIC_TUNEAI_CONFIG_JSON: ${{ vars.NEXT_PUBLIC_TUNEAI_CONFIG_JSON }}
+          NEXT_PUBLIC_YANDEX_METRIKA_ID: ${{ vars.NEXT_PUBLIC_YANDEX_METRIKA_ID || '111976668' }}
         run: |
           docker build \
             --file frontend/Dockerfile \
@@ -319,6 +320,7 @@ jobs:
             --build-arg "NEXT_PUBLIC_TUNEAI_SUCCESS_COLOR=${NEXT_PUBLIC_TUNEAI_SUCCESS_COLOR}" \
             --build-arg "NEXT_PUBLIC_TUNEAI_EMBED_ALLOWED_ORIGINS=${NEXT_PUBLIC_TUNEAI_EMBED_ALLOWED_ORIGINS}" \
             --build-arg "NEXT_PUBLIC_TUNEAI_CONFIG_JSON=${NEXT_PUBLIC_TUNEAI_CONFIG_JSON}" \
+            --build-arg "NEXT_PUBLIC_YANDEX_METRIKA_ID=${NEXT_PUBLIC_YANDEX_METRIKA_ID}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --tag "${REGISTRY_IMAGE}/frontend:${IMAGE_TAG}" \
             .

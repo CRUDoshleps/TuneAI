@@ -44,6 +44,7 @@ import {
   type PlatformRole,
   type PublicView
 } from "../lib/platform-config";
+import { METRIKA_GOALS, reachMetrikaGoal } from "../lib/metrika";
 import {
   AdminAttempt,
   AuditLog,
@@ -76,6 +77,7 @@ import {
   UserInvite,
   User
 } from "../lib/api";
+import BrandMark from "./BrandMark";
 import { FeedbackScreen } from "./ProductScreens";
 
 type TokenPair = { access_token: string; refresh_token: string };
@@ -453,6 +455,9 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
   const [error, setError] = useState<string>("");
   const [publicView, setPublicView] = useState<PublicView>("home");
   const openPublicView = (view: PublicView) => {
+    if (view === "demo" && publicView !== "demo") {
+      reachMetrikaGoal(METRIKA_GOALS.demoOpen, { source_view: publicView });
+    }
     setError("");
     setPublicView(view);
     window.scrollTo({ top: 0, left: 0 });
@@ -756,6 +761,10 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       });
       saveAuth(pair);
       await loadMe(pair.access_token);
+      reachMetrikaGoal(mode === "register" ? METRIKA_GOALS.register : METRIKA_GOALS.login, {
+        auth_method: "email",
+        account_space: authSpace
+      });
       setStatus("Вы вошли в систему");
     } catch (err) {
       const fallback = mode === "register" ? "Не удалось создать аккаунт." : "Не удалось войти в аккаунт.";
@@ -811,6 +820,10 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       } else {
         setActiveSection("builder");
       }
+      reachMetrikaGoal(METRIKA_GOALS.demoStart, {
+        scenario_id: demoScenario.id,
+        flow
+      });
       setStatus("Пробный сценарий готов к работе");
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось открыть пробный сценарий."));
@@ -1865,8 +1878,10 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
         <main className="widget-shell" style={themeVars}>
           <section className="widget-card widget-login" aria-label={`${activePlatformConfig.productName} widget login`}>
             <div className="widget-brand">
-              {activePlatformConfig.logoUrl && (
+              {activePlatformConfig.logoUrl ? (
                 <span className="logo-image" style={{ backgroundImage: `url(${activePlatformConfig.logoUrl})` }} aria-hidden="true" />
+              ) : (
+                <BrandMark />
               )}
               <strong>{activePlatformConfig.logoText}</strong>
             </div>
@@ -1892,8 +1907,10 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
         <section className="widget-card widget-runner" aria-label={`${activePlatformConfig.productName} встроенная проверка`}>
           <header className="widget-header">
             <div className="widget-brand">
-              {activePlatformConfig.logoUrl && (
+              {activePlatformConfig.logoUrl ? (
                 <span className="logo-image" style={{ backgroundImage: `url(${activePlatformConfig.logoUrl})` }} aria-hidden="true" />
+              ) : (
+                <BrandMark />
               )}
               <strong>{activePlatformConfig.logoText}</strong>
             </div>
@@ -1946,8 +1963,10 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
         <section className="landing-card">
           <header className="landing-nav">
             <div className="logo-word">
-              {activePlatformConfig.logoUrl && (
+              {activePlatformConfig.logoUrl ? (
                 <span className="logo-image" style={{ backgroundImage: `url(${activePlatformConfig.logoUrl})` }} aria-hidden="true" />
+              ) : (
+                <BrandMark />
               )}
               {activePlatformConfig.logoText}
             </div>
@@ -2034,7 +2053,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
 
               <section className="landing-final-cta">
                 <div><p className="landing-overline">Посмотрите изнутри</p><h2>Попробуйте один ответ — дальше интерфейс объяснит сам.</h2></div>
-                <div><button className="primary" type="button" onClick={() => openPublicView("demo")}>Открыть демонстрацию <ChevronRight size={17} /></button><a href={consultationHref}>Обсудить внедрение</a></div>
+                <div><button className="primary" type="button" onClick={() => openPublicView("demo")}>Открыть демонстрацию <ChevronRight size={17} /></button><a href={consultationHref} onClick={() => reachMetrikaGoal(METRIKA_GOALS.consultation, { placement: "landing_final_cta" })}>Обсудить внедрение</a></div>
               </section>
             </section>
           ) : publicView === "demo" ? (
@@ -2254,7 +2273,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       <aside className="sidebar">
         <div className="sidebar-top">
           <div>
-            <div className="mark small"><Activity size={22} /></div>
+            <BrandMark className="sidebar-brand-mark" />
             <h1>{activePlatformConfig.productName}</h1>
             <p>{user.full_name}</p>
             <span className="role">{ROLE_LABELS[user.role]}</span>

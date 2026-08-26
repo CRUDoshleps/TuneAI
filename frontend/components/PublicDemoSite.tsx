@@ -19,6 +19,7 @@ import {
   officialPlatformConfig,
   platformConfig
 } from "../lib/platform-config";
+import BrandMark from "./BrandMark";
 
 const siteConfig = platformConfig.template === "official" ? platformConfig : officialPlatformConfig;
 const themeVars = buildPlatformThemeVars(siteConfig);
@@ -94,6 +95,11 @@ export default function PublicDemoSite() {
     <main className="public-demo-site" style={themeVars}>
       <header className="site-demo-nav">
         <Link className="site-demo-brand" href="/">
+          {siteConfig.logoUrl ? (
+            <span className="logo-image" style={{ backgroundImage: `url(${siteConfig.logoUrl})` }} aria-hidden="true" />
+          ) : (
+            <BrandMark />
+          )}
           <span>{siteConfig.logoText}</span>
         </Link>
         <nav aria-label="Навигация публичной демонстрации TuneAI">
