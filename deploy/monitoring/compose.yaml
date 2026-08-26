@@ -1,0 +1,157 @@
+name: tuneai-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    cpus: 0.35
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  grafana:
+    image: grafana/grafana:13.2.0@sha256:3fd54ae1214669f8355f065ec9f6445d5279a3d77095ab048ca045685272429b
+    restart: unless-stopped
+    environment:
+      GF_SERVER_DOMAIN: tuneai.vnshk.ru
+      GF_SERVER_ROOT_URL: https://tuneai.vnshk.ru/monitoring/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_UNIFIED_ALERTING_ENABLED: "true"
+    secrets:
+      - grafana_admin_password
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      monitoring:
+      edge:
+        aliases:
+          - tuneai-grafana
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /var/log/grafana:size=16m,mode=0755
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    cpus: 0.35
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 8
+      start_period: 30s
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|run/docker/netns/.+)($|/)
+    volumes:
+      - /:/host:ro,rslave
+    networks:
+      - monitoring
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 96m
+    cpus: 0.10
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.5@sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    networks:
+      - monitoring
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 192m
+    cpus: 0.20
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.28.0@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+    volumes:
+      - ./blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    networks:
+      - monitoring
+      - egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 96m
+    cpus: 0.10
+
+networks:
+  monitoring:
+    internal: true
+  egress:
+  edge:
+    external: true
+    name: platform-edge_default
+
+volumes:
+  prometheus-data:
+    name: tuneai-monitoring-prometheus-data
+  grafana-data:
+    name: tuneai-monitoring-grafana-data
+
+secrets:
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password

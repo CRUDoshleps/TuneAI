@@ -224,6 +224,11 @@ jobs:
           assert any(secret["source"] == "yandex_api_key" for secret in services["bootstrap-admin"]["secrets"])
           PY
           grep -q 'app.scripts.check_ai' deploy/deploy.sh
+          install -d -m 0700 deploy/monitoring/secrets
+          printf 'ci-placeholder\n' >deploy/monitoring/secrets/grafana_admin_password
+          docker compose -f deploy/monitoring/compose.yaml config --quiet
+          python -m json.tool deploy/monitoring/grafana/dashboards/tuneai-overview.json >/dev/null
+          rm -rf deploy/monitoring/secrets
           grep -q '/opt/tuneai-deploy' backend/Dockerfile
           grep -q 'sync_release_deploy_files' deploy/watch-registry.sh
 

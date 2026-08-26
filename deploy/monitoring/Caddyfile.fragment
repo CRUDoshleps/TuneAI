@@ -1,0 +1,9 @@
+# Add these routes before the catch-all TuneAI reverse_proxy.
+@monitoring path /monitoring /monitoring/*
+handle @monitoring {
+	reverse_proxy tuneai-grafana:3000
+}
+
+handle {
+	reverse_proxy tuneai-frontend:3000
+}
