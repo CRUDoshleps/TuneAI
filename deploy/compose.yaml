@@ -6,7 +6,10 @@ x-backend-environment: &backend-environment
   POSTGRES_HOST: ${POSTGRES_HOST:?POSTGRES_HOST is required}
   YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
   YANDEX_MOCK: "false"
-  YANDEX_USE_METADATA_IAM: "true"
+  # VM metadata is not reachable through the current Docker bridge. Keep this
+  # configurable so metadata IAM can be enabled after a scoped host proxy is
+  # introduced, while production continues to use the Lockbox API key.
+  YANDEX_USE_METADATA_IAM: ${YANDEX_USE_METADATA_IAM:-false}
   YANDEX_DATA_LOGGING_ENABLED: "false"
   RUNTIME_AI_PROVIDER_CONFIG_ENABLED: ${RUNTIME_AI_PROVIDER_CONFIG_ENABLED:-true}
   CORS_ORIGINS: https://tuneai.vnshk.ru
@@ -53,6 +56,7 @@ x-backend-secrets: &backend-secrets
   - secret_key
   - postgres_password
   - rabbitmq_password
+  - yandex_api_key
 
 x-security: &security
   read_only: true
@@ -264,6 +268,8 @@ secrets:
     file: /run/apps/tuneai/postgres_password
   rabbitmq_password:
     file: /run/apps/tuneai/rabbitmq_password
+  yandex_api_key:
+    file: /run/apps/tuneai/yandex_api_key
   bootstrap_admin_email:
     file: /run/apps/tuneai/bootstrap_admin_email
   bootstrap_admin_password:

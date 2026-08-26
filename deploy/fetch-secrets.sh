@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 runtime_dir="/run/apps/tuneai"
-required_keys="secret_key postgres_password rabbitmq_password bootstrap_admin_email bootstrap_admin_password"
+required_keys="secret_key postgres_password rabbitmq_password yandex_api_key bootstrap_admin_email bootstrap_admin_password"
 : "${LOCKBOX_SECRET_ID:?LOCKBOX_SECRET_ID is required}"
 
 install -d -m 0700 "$runtime_dir"

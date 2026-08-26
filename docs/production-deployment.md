@@ -19,8 +19,8 @@ push/merge в trunk-ветку `main`. Ручной повторный запу�
    который присутствует одновременно в backend и frontend repositories.
 6. Host получает application secrets из Lockbox своей instance identity,
    выполняет Alembic migrations и обновляет Compose stack. Backend и worker
-   получают короткоживущий Yandex IAM-токен из metadata service аккаунта VM;
-   статический Yandex API key для official production не используется.
+   используют Yandex API key из Lockbox: metadata service VM недоступен через
+   изолированный Docker bridge без отдельного host proxy.
 7. Перед фиксацией релиза host выполняет embedding + completion deep probe,
    затем проверяет контейнеры и внешний `https://tuneai.vnshk.ru/api/health`
    с точным git SHA.
@@ -77,10 +77,10 @@ LOCKBOX_SECRET_ID=<secret-id>
 PUBLIC_HEALTH_URL=https://tuneai.vnshk.ru/api/health
 ```
 
-Lockbox secret `tuneai-prod` содержит application secrets. Instance service
-account `prod-runtime` имеет `lockbox.payloadViewer` только на этот secret и
-`container-registry.images.puller` на production registry. Для AI runtime ему
-также нужны folder roles `ai.languageModels.user` и `ai.speechkit-stt.user`.
+Lockbox secret `tuneai-prod` содержит application secrets, включая
+`yandex_api_key`. Instance service account `prod-runtime` имеет
+`lockbox.payloadViewer` только на этот secret и
+`container-registry.images.puller` на production registry.
 
 Однократная установка watcher на уже подготовленной VM:
 
