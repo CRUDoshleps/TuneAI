@@ -215,7 +215,7 @@ jobs:
           with open("/tmp/tuneai-production-compose.json", encoding="utf-8") as compose_file:
               services = json.load(compose_file)["services"]
           environment = services["backend"]["environment"]
-          assert environment["YANDEX_USE_METADATA_IAM"] == "true"
+          assert environment["YANDEX_USE_METADATA_IAM"] == "false"
           assert environment["DEMO_BOOTSTRAP_ENABLED"] == "true"
           assert environment["DEMO_BOOTSTRAP_LIMIT_PER_HOUR"] == "20"
           assert environment["DEMO_BOOTSTRAP_TTL_HOURS"] == "6"
