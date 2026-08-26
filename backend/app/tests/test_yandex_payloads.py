@@ -53,12 +53,61 @@ class FakeAsyncClient:
         )
 
 
+class MetadataFakeAsyncClient:
+    metadata_calls = 0
+    post_headers: list[dict[str, str]] = []
+
+    def __init__(self, **_: object) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+    async def get(self, url: str, *, headers: dict[str, str], **_: object) -> FakeResponse:
+        assert "computeMetadata" in url
+        assert headers == {"Metadata-Flavor": "Google"}
+        self.__class__.metadata_calls += 1
+        return FakeResponse({"access_token": "metadata-token", "expires_in": 3600})
+
+    async def post(self, url: str, *, headers: dict[str, str], json: dict, **_: object) -> FakeResponse:
+        self.__class__.post_headers.append(headers)
+        assert "textEmbedding" in url
+        assert json["text"]
+        return FakeResponse({"embedding": [0.1, 0.2, 0.3]})
+
+
 def real_settings() -> Settings:
     return Settings(
         yandex_mock=False,
         yandex_api_key="test-key",
         yandex_folder_id="test-folder",
     )
+
+
+@pytest.mark.asyncio
+async def test_metadata_iam_takes_precedence_over_stale_api_key_and_is_cached(monkeypatch):
+    MetadataFakeAsyncClient.metadata_calls = 0
+    MetadataFakeAsyncClient.post_headers = []
+    monkeypatch.setattr(yandex.httpx, "AsyncClient", MetadataFakeAsyncClient)
+    client = YandexAIClient(
+        Settings(
+            yandex_mock=False,
+            yandex_api_key="stale-key",
+            yandex_folder_id="test-folder",
+            yandex_use_metadata_iam=True,
+        )
+    )
+
+    assert await client.embed_query("first") == [0.1, 0.2, 0.3]
+    assert await client.embed_query("second") == [0.1, 0.2, 0.3]
+
+    assert MetadataFakeAsyncClient.metadata_calls == 1
+    assert len(MetadataFakeAsyncClient.post_headers) == 2
+    assert all(headers["Authorization"] == "Bearer metadata-token" for headers in MetadataFakeAsyncClient.post_headers)
+    assert all(headers["x-folder-id"] == "test-folder" for headers in MetadataFakeAsyncClient.post_headers)
 
 
 @pytest.mark.asyncio

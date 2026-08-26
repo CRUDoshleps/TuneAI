@@ -51,6 +51,9 @@ def public_config() -> PublicConfigRead:
                     }
         except json.JSONDecodeError:
             pass
+    # This capability is controlled by the server and must not be spoofed by
+    # branding JSON. The frontend uses it to avoid advertising a disabled flow.
+    config["demoBootstrapEnabled"] = settings.demo_bootstrap_enabled
     return PublicConfigRead(config=config)
 
 

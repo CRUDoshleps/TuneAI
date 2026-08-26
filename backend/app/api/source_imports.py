@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -110,8 +112,8 @@ def accept_candidate(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Question:
-    source = _managed_source(db, source_id, user)
-    candidates = list(source.candidates or [])
+    source = _managed_source(db, source_id, user, for_update=True)
+    candidates = deepcopy(list(source.candidates or []))
     candidate = next((item for item in candidates if item.get("id") == candidate_id), None)
     if candidate is None:
         raise HTTPException(status_code=404, detail="Предложенный вопрос не найден")
@@ -147,8 +149,11 @@ def accept_candidate(
     return question
 
 
-def _managed_source(db: Session, source_id: str, user: User) -> SourceImport:
-    source = db.get(SourceImport, source_id)
+def _managed_source(db: Session, source_id: str, user: User, *, for_update: bool = False) -> SourceImport:
+    statement = select(SourceImport).where(SourceImport.id == source_id)
+    if for_update:
+        statement = statement.with_for_update()
+    source = db.scalar(statement)
     if source is None:
         raise HTTPException(status_code=404, detail="Источник не найден")
     _managed_test(db, source.test_id, user)

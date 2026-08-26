@@ -19,7 +19,6 @@ export default function NotFound() {
           </div>
         </section>
 
-        <div className="brand-wordmark" aria-hidden="true">tuneai</div>
       </section>
     </main>
   );

@@ -18,11 +18,11 @@
 
 ```env
 DEMO_BOOTSTRAP_ENABLED=true
-DEMO_BOOTSTRAP_LIMIT_PER_HOUR=30
-DEMO_BOOTSTRAP_TTL_HOURS=24
+DEMO_BOOTSTRAP_LIMIT_PER_HOUR=20
+DEMO_BOOTSTRAP_TTL_HOURS=6
 ```
 
-Для production-стенда публичный bootstrap лучше отключать через `DEMO_BOOTSTRAP_ENABLED=false`.
+На официальном production-стенде bootstrap включён с лимитом и коротким TTL. В закрытом self-host контуре его можно отключить через `DEMO_BOOTSTRAP_ENABLED=false`; frontend получает фактическое состояние через `/public/config` и не показывает неработающую кнопку.
 
 ## Seed-аккаунты
 
@@ -46,4 +46,4 @@ admin@tuneai.dev / password123
 
 Seed-аккаунты нужны для стабильных демонстрационных данных. Demo bootstrap подходит, когда нужен новый временный сценарий.
 
-Админские аккаунты открываются через вкладку **Админка**. Обычные демо-пользователи входят через вкладку **Пользователь**.
+Seed-аккаунты предназначены для локальной разработки и не публикуются как учётные данные официального production-стенда.

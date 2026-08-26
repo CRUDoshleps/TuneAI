@@ -15,7 +15,7 @@ from app.db.session import get_db
 from app.deps import require_roles
 from app.models import Answer, AnswerStatusEnum, Attempt, AttemptStatusEnum, AuditLog, OutboxEvent, OutboxStatusEnum, RoleEnum, Test, User
 from app.schemas import AdminAttemptRead, AdminDashboard, AdminFailedJobRead, AuditLogRead, SystemHealthCheck, SystemHealthRead
-from app.services.ai_provider_runtime import active_provider_readiness
+from app.services.ai_provider_runtime import active_provider_readiness, probe_active_ai_provider
 from app.services.audit import record_audit
 from app.services.outbox import ANSWER_UPLOADED, add_outbox_event
 
@@ -56,7 +56,7 @@ def dashboard(
 
 
 @router.get("/system", response_model=SystemHealthRead)
-def system_health(
+async def system_health(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(RoleEnum.admin)),
 ) -> SystemHealthRead:
@@ -79,11 +79,22 @@ def system_health(
     checks.append(_rabbitmq_check(settings.rabbitmq_url))
     checks.append(_storage_check(settings.upload_dir))
     ai = active_provider_readiness(db, settings)
-    if ai:
-        checks.append(_check("ai", "ok" if ai.configured else "warning", f"{ai.provider}: {ai.status}"))
+    configured = ai.configured if ai else settings.yandex_mock or bool(
+        (
+            settings.yandex_use_metadata_iam
+            or settings.yandex_api_key
+            or settings.yandex_iam_token
+        )
+        and settings.yandex_folder_id
+    )
+    if not configured:
+        checks.append(_check("ai", "warning", f"{ai.provider}: configuration required" if ai else "AI credentials are incomplete"))
     else:
-        configured = settings.yandex_mock or bool((settings.yandex_api_key or settings.yandex_iam_token) and settings.yandex_folder_id)
-        checks.append(_check("ai", "ok" if configured else "warning", "Mock AI" if settings.yandex_mock else "AI credentials are incomplete"))
+        try:
+            details = await probe_active_ai_provider(db, settings)
+            checks.append(_check("ai", "ok", details))
+        except Exception as exc:
+            checks.append(_check("ai", "error", f"Operational probe failed: {str(exc)[:300]}"))
     moodle_ready = settings.moodle_integration_enabled and bool(settings.moodle_integration_token)
     checks.append(_check("moodle", "ok" if moodle_ready else "warning", "Moodle service API enabled" if moodle_ready else "Moodle service API is disabled"))
     last_answer_error = db.scalar(select(Answer.error_message).where(Answer.status == AnswerStatusEnum.failed).order_by(Answer.updated_at.desc()).limit(1))

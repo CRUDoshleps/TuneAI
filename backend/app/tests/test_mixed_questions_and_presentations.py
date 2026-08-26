@@ -116,6 +116,25 @@ def test_pptx_import_generates_mixed_candidates_and_accepts_question(client):
     assert accepted.status_code == 201, accepted.text
     assert accepted.json()["question_type"] == "single_choice"
     assert accepted.json()["correct_option_ids"]
+    source_after_accept = client.get(
+        f"/source-imports/{source_payload['id']}",
+        headers=auth_header(token),
+    )
+    assert source_after_accept.status_code == 200, source_after_accept.text
+    accepted_candidate = next(
+        item for item in source_after_accept.json()["candidates"] if item["id"] == candidate_id
+    )
+    assert accepted_candidate["status"] == "accepted"
+    assert accepted_candidate["question_id"] == accepted.json()["id"]
+    accepted_again = client.post(
+        f"/source-imports/{source_payload['id']}/candidates/{candidate_id}/accept",
+        headers=auth_header(token),
+    )
+    assert accepted_again.status_code == 201, accepted_again.text
+    assert accepted_again.json()["id"] == accepted.json()["id"]
+    test_after_accept = client.get(f"/tests/{test['id']}", headers=auth_header(token))
+    assert test_after_accept.status_code == 200, test_after_accept.text
+    assert len(test_after_accept.json()["questions"]) == 2
     audit = client.get("/admin/audit-log", headers=auth_header(token))
     assert audit.status_code == 200
     assert any(item["action"] == "question.accept_generated" for item in audit.json())

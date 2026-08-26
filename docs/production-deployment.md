@@ -17,16 +17,20 @@ push/merge в trunk-ветку `main`. Ручной повторный запу�
    keys в GitHub не хранятся.
 5. `tuneai-deploy.timer` на VM раз в минуту выбирает только последний git SHA,
    который присутствует одновременно в backend и frontend repositories.
-6. Host получает secrets из Lockbox своей instance identity, выполняет
-   Alembic migrations, обновляет Compose stack и проверяет контейнеры и внешний
-   `https://tuneai.vnshk.ru/api/health` с точным git SHA.
-7. При ошибке приложение возвращается на предыдущий image tag. Миграции БД не
+6. Host получает application secrets из Lockbox своей instance identity,
+   выполняет Alembic migrations и обновляет Compose stack. Backend и worker
+   получают короткоживущий Yandex IAM-токен из metadata service аккаунта VM;
+   статический Yandex API key для official production не используется.
+7. Перед фиксацией релиза host выполняет embedding + completion deep probe,
+   затем проверяет контейнеры и внешний `https://tuneai.vnshk.ru/api/health`
+   с точным git SHA.
+8. При ошибке приложение возвращается на предыдущий image tag. Миграции БД не
    откатываются, поэтому изменения схемы для обычного merge должны следовать
    expand/migrate/contract и оставаться совместимыми с предыдущей версией.
-8. `tuneai-health.timer` раз в минуту проверяет внешний readiness с production
+9. `tuneai-health.timer` раз в минуту проверяет внешний readiness с production
    PostgreSQL, AI readiness, точный deployed SHA, health контейнеров, rollout
    timer и заполнение системного диска.
-9. После успешного rollout host сохраняет текущий и предыдущий TuneAI image для
+10. После успешного rollout host сохраняет текущий и предыдущий TuneAI image для
    rollback, а более старые локальные TuneAI images удаляет. Registry хранит
    более длинную историю релизов по отдельной lifecycle policy.
 
@@ -75,7 +79,8 @@ PUBLIC_HEALTH_URL=https://tuneai.vnshk.ru/api/health
 
 Lockbox secret `tuneai-prod` содержит application secrets. Instance service
 account `prod-runtime` имеет `lockbox.payloadViewer` только на этот secret и
-`container-registry.images.puller` на production registry.
+`container-registry.images.puller` на production registry. Для AI runtime ему
+также нужны folder roles `ai.languageModels.user` и `ai.speechkit-stt.user`.
 
 Однократная установка watcher на уже подготовленной VM:
 
@@ -94,6 +99,7 @@ journalctl -u tuneai-deploy.service --since today
 docker compose --project-name tuneai -f /srv/apps/tuneai/deploy/compose.yaml ps
 curl -fsS https://tuneai.vnshk.ru/api/health | jq
 curl -fsS https://tuneai.vnshk.ru/api/readiness | jq
+curl -fsS https://tuneai.vnshk.ru/api/readiness/ai/deep | jq
 ```
 
 Ручной rollback использует предыдущий immutable tag:

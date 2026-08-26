@@ -20,6 +20,7 @@ import {
   LogOut,
   Mail,
   Mic,
+  MoreHorizontal,
   Play,
   Plus,
   Presentation,
@@ -39,7 +40,6 @@ import {
   mergePlatformConfig,
   platformConfig as defaultPlatformConfig,
   type DemoFlow,
-  type DemoScenarioConfig,
   type PlatformConfig,
   type PlatformRole,
   type PublicView
@@ -76,12 +76,26 @@ import {
   UserInvite,
   User
 } from "../lib/api";
+import { FeedbackScreen } from "./ProductScreens";
 
 type TokenPair = { access_token: string; refresh_token: string };
 type SectionId = "overview" | "take" | "builder" | "materials" | "review" | "admin";
 
 function isSectionId(value: string | null): value is SectionId {
   return value === "overview" || value === "take" || value === "builder" || value === "materials" || value === "review" || value === "admin";
+}
+
+function allowedSectionsForUser(user: User, tests: Test[], config: PlatformConfig): Set<SectionId> {
+  const role = user.role as PlatformRole;
+  const manageableTests = tests.some((test) => user.role === "admin" || test.owner_id === user.id);
+  const sections = new Set<SectionId>(["overview", "take"]);
+
+  if (config.permissions.testCreatorRoles.includes(role)) sections.add("builder");
+  if (manageableTests) sections.add("materials");
+  if (config.permissions.answerReviewerRoles.includes(role)) sections.add("review");
+  if (user.role === "admin") sections.add("admin");
+
+  return sections;
 }
 
 const ROLE_LABELS: Record<User["role"], string> = {
@@ -403,7 +417,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
   const [activePlatformConfig, setActivePlatformConfig] = useState<PlatformConfig>(defaultPlatformConfig);
   const [token, setToken] = useState<string>("");
   const [user, setUser] = useState<User | null>(null);
-  const [mode, setMode] = useState<"login" | "register">(appMode === "widget" ? "login" : "register");
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [authSpace, setAuthSpace] = useState<"public" | "admin">("public");
   const [tests, setTests] = useState<Test[]>([]);
   const [selectedTest, setSelectedTest] = useState<Test | null>(null);
@@ -434,14 +448,22 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     const value = new URLSearchParams(window.location.search).get("section");
     return isSectionId(value) ? value : "overview";
   });
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [, setStatus] = useState<string>("Готово к работе");
   const [error, setError] = useState<string>("");
   const [publicView, setPublicView] = useState<PublicView>("home");
   const openPublicView = (view: PublicView) => {
+    setError("");
     setPublicView(view);
     window.scrollTo({ top: 0, left: 0 });
   };
+  const openLoginView = () => {
+    setMode("login");
+    openPublicView("auth");
+  };
   const [demoScenarioId, setDemoScenarioId] = useState<string>(defaultPlatformConfig.demoScenarios[0]?.id || "self-training");
+  const [demoStarting, setDemoStarting] = useState(false);
+  const demoStartingRef = useRef(false);
   const [widgetTestId] = useState<string>(() => {
     if (typeof window === "undefined") {
       return "";
@@ -566,6 +588,8 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       return;
     }
     const availableTests = await loadTests(activeToken);
+    const allowedSections = allowedSectionsForUser(me, availableTests, activePlatformConfig);
+    setActiveSection((current) => allowedSections.has(current) ? current : "overview");
     await loadAttemptHistory(activeToken, availableTests);
     await loadCompetencies(activeToken);
     if (activePlatformConfig.permissions.answerReviewerRoles.includes(me.role as PlatformRole)) {
@@ -707,6 +731,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     setQuestionGenerationMeta(null);
     setCalibrationPreview(null);
     setActiveSection("overview");
+    setMobileMenuOpen(false);
   }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
@@ -738,45 +763,17 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     }
   }
 
-  async function loginDemoAccount(scenario: DemoScenarioConfig) {
-    setError("");
-    try {
-      const pair = await apiFetch<TokenPair>("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email: scenario.accountEmail, password: "password123" })
-      });
-      saveAuth(pair);
-      const me = await apiFetch<User>("/auth/me", {}, pair.access_token);
-      setUser(me);
-      const availableTests = await loadTests(pair.access_token);
-      await loadAttemptHistory(pair.access_token, availableTests);
-      const matchingTest =
-        availableTests.find((item) => item.test_type === scenario.testType) ||
-        availableTests.find((item) => item.title.toLowerCase().includes(scenario.label.toLowerCase())) ||
-        availableTests[0];
-      if (matchingTest) {
-        setSelectedTest(matchingTest);
-        if (scenario.flow === "take") {
-          const nextAttempt = await apiFetch<Attempt>(
-            "/attempts",
-            { method: "POST", body: JSON.stringify({ test_id: matchingTest.id }) },
-            pair.access_token
-          );
-          setAttempt(nextAttempt);
-          setAttemptHistory([nextAttempt]);
-          setActiveSection("take");
-        }
-      }
-      setStatus(`Открыт пробный сценарий: ${scenario.label}`);
-    } catch {
-      await startDemoFlow(scenario.flow, scenario.id);
-    }
-  }
-
   async function startDemoFlow(flow: DemoFlow, scenarioId = demoScenarioId) {
     setError("");
+    if (!activePlatformConfig.demoBootstrapEnabled) {
+      setError("Пробный контур отключён на этом сервере. Войдите в существующий аккаунт.");
+      return;
+    }
+    if (demoStartingRef.current) return;
     const demoScenario =
       activePlatformConfig.demoScenarios.find((scenario) => scenario.id === scenarioId) || activePlatformConfig.demoScenarios[0];
+    demoStartingRef.current = true;
+    setDemoStarting(true);
     try {
       const bootstrap = await apiFetch<DemoBootstrapResponse>("/public/demo/bootstrap", {
         method: "POST",
@@ -817,6 +814,9 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       setStatus("Пробный сценарий готов к работе");
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось открыть пробный сценарий."));
+    } finally {
+      demoStartingRef.current = false;
+      setDemoStarting(false);
     }
   }
 
@@ -1874,9 +1874,9 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
               <h1>Войдите, чтобы пройти назначенный тест.</h1>
               <p>Используйте логин и пароль, которые выдал преподаватель, интервьюер или администратор.</p>
             </div>
-            <form onSubmit={handleWidgetLogin} className="stack">
-              <input name="email" type="email" placeholder="Email" required />
-              <input name="password" type="password" placeholder="Пароль" required minLength={1} />
+            <form onSubmit={handleWidgetLogin} className="stack widget-login-form">
+              <label className="auth-field">Email<input name="email" type="email" autoComplete="email" required /></label>
+              <label className="auth-field">Пароль<input name="password" type="password" autoComplete="current-password" required minLength={1} /></label>
               <button className="primary" type="submit"><UserRound size={18} /> Войти</button>
             </form>
             {error && <p className="error">{error}</p>}
@@ -1967,50 +1967,26 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                 </button>
               ))}
             </nav>
-            <button className="nav-pill" type="button" onClick={() => openPublicView("demo")}>Войти</button>
+            <button className="nav-pill" type="button" onClick={openLoginView}>Войти</button>
           </header>
 
           {publicView === "home" ? (
             <section className="public-home">
               <section className="landing-hero home-hero">
                 <div className="hero-copy">
-                  <p className="landing-overline">Подготовка к устному ответу</p>
-                  <h1>Ответьте своими словами. <span>Поймите, что улучшить.</span></h1>
-                  <p>Запишите ответ — {activePlatformConfig.productName} сопоставит его с материалами курса и покажет, какие мысли раскрыты, а какие стоит уточнить.</p>
+                  <p className="landing-overline">Для студентов и преподавателей</p>
+                  <h1>Потренируйте устный ответ <span>до экзамена.</span></h1>
+                  <p>{activePlatformConfig.productName} помогает студенту подготовиться, а преподавателю — быстрее провести первичную проверку. Ответьте голосом или текстом: система сопоставит ответ с материалами курса и объяснит, что получилось, чего не хватило и что повторить.</p>
                   <div className="hero-actions">
                     <button className="primary" onClick={() => openPublicView("demo")}>
                       <Mic size={17} /> Попробовать ответ
                     </button>
-                    <button className="landing-text-action" type="button" onClick={() => openPublicView("demo")}>У меня есть аккаунт</button>
+                    <button className="landing-text-action" type="button" onClick={openLoginView}>У меня есть аккаунт</button>
                   </div>
                   <p className="landing-trust"><Shield size={16} /> Спорные оценки остаются на проверке у преподавателя.</p>
                 </div>
 
-                <div className="answer-stage">
-                  <section className="answer-sheet" aria-label="Пример разбора устного ответа">
-                    <header className="answer-sheet-head"><strong>Тренировка · вопрос 2 из 5</strong></header>
-                    <div className="answer-sheet-question">
-                      <span>Вопрос</span>
-                      <h2>Почему transactional outbox помогает не терять события?</h2>
-                    </div>
-                    <div className="answer-transcript">
-                      <span>00:18</span>
-                      <p>Событие записывается <mark>в одной транзакции</mark> с изменением данных. Затем worker отправляет его в очередь и может безопасно повторить попытку.</p>
-                    </div>
-                    <div className="answer-score-row">
-                      <div className="answer-score"><strong>8,2</strong><small>из 10 баллов</small></div>
-                      <div className="answer-criteria" aria-label="Критерии оценки">
-                        {[['Смысл раскрыт', 90], ['Опора на материалы', 76], ['Полнота примера', 64]].map(([label, score]) => (
-                          <div className="answer-criterion" key={String(label)}>
-                            <span>{label}</span><b>{score}%</b>
-                            <i aria-hidden="true"><i style={{ width: `${score}%` }} /></i>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </section>
-                  <span className="answer-record-mark" aria-hidden="true"><Mic size={21} /></span>
-                </div>
+                <div className="answer-stage"><FeedbackScreen compact /></div>
               </section>
 
               <section className="landing-process" aria-labelledby="landing-process-title">
@@ -2061,13 +2037,13 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                 <div><button className="primary" type="button" onClick={() => openPublicView("demo")}>Открыть демонстрацию <ChevronRight size={17} /></button><a href={consultationHref}>Обсудить внедрение</a></div>
               </section>
             </section>
-          ) : (
+          ) : publicView === "demo" ? (
             <section className="demo-page">
               <div className="demo-heading">
                 <div>
-                  <div className="eyebrow">Пробный сценарий</div>
-                  <h1>Выберите сценарий и посмотрите платформу изнутри.</h1>
-                  <p>Пробная регистрация создаст временного пользователя, тест и материалы для выбранного сценария.</p>
+                  <p className="landing-overline">Демонстрация платформы</p>
+                  <h1>Выберите роль — мы подготовим всё остальное.</h1>
+                  <p>Без регистрации и настройки: создадим временный контур, откроем тест и покажем нужный рабочий процесс.</p>
                 </div>
                 <a className="secondary" href={activePlatformConfig.docsUrl} target="_blank" rel="noreferrer">Документация</a>
               </div>
@@ -2088,9 +2064,11 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
 
               <section className="demo-detail">
                 <div className="demo-story">
-                  <span>{activeDemoScenario.roleLabel}</span>
-                  <h2>{activeDemoScenario.title}</h2>
-                  <p>{activeDemoScenario.description}</p>
+                  <div className="demo-story-copy">
+                    <span>{activeDemoScenario.roleLabel}</span>
+                    <h2>{activeDemoScenario.title}</h2>
+                    <p>{activeDemoScenario.description}</p>
+                  </div>
                   <div className="demo-checkpoints">
                     {activeDemoScenario.checkpoints.map((checkpoint, index) => (
                       <div key={checkpoint}>
@@ -2099,43 +2077,106 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                       </div>
                     ))}
                   </div>
-                  <div className="hero-actions left">
-                    <button className="primary" onClick={() => startDemoFlow(activeDemoScenario.flow, activeDemoScenario.id)}>
-                      Создать пробный контур
-                    </button>
-                    <button className="secondary" onClick={() => loginDemoAccount(activeDemoScenario)}>
-                      Войти под тестовым аккаунтом
-                    </button>
+                  <div className="demo-action-band">
+                    <div>
+                      <strong>
+                        {activePlatformConfig.demoBootstrapEnabled
+                          ? "Готово примерно за 10 секунд"
+                          : "Пробный контур отключён на этом сервере"}
+                      </strong>
+                      <span>
+                        {activePlatformConfig.demoBootstrapEnabled
+                          ? "Временные данные удаляются автоматически."
+                          : "Войдите в существующий аккаунт, чтобы продолжить."}
+                      </span>
+                    </div>
+                    <div className="hero-actions left">
+                      <button
+                        className="primary"
+                        disabled={demoStarting || !activePlatformConfig.demoBootstrapEnabled}
+                        onClick={() => startDemoFlow(activeDemoScenario.flow, activeDemoScenario.id)}
+                      >
+                        {demoStarting ? "Готовим сценарий…" : "Запустить пробный сценарий"}
+                      </button>
+                      <button className="secondary" onClick={openLoginView}>
+                        Войти в аккаунт
+                      </button>
+                    </div>
                   </div>
                 </div>
+              </section>
+              {error && <div className="banner error demo-error" role="alert">{error}</div>}
+            </section>
+          ) : (
+            <section className="auth-page" aria-labelledby="auth-page-title">
+              <div className="auth-page-intro">
+                <p className="landing-overline">Доступ к платформе</p>
+                <h1 id="auth-page-title">
+                  {mode === "register"
+                    ? authSpace === "admin" ? "Создайте аккаунт администратора." : "Создайте аккаунт."
+                    : authSpace === "admin" ? "Вход для администратора." : "Продолжите работу в TuneAI."}
+                </h1>
+                <p>
+                  {authSpace === "admin"
+                    ? "Управление пользователями, тестами, материалами и настройками системы."
+                    : "Ваши назначенные тесты, попытки, результаты и рекомендации — в одном месте."}
+                </p>
+                <button className="auth-demo-link" type="button" onClick={() => openPublicView("demo")}>
+                  <Play size={17} /> Сначала посмотреть пробный сценарий
+                </button>
+              </div>
 
-                <section className="auth-panel demo-auth-panel">
-                  <div className="tabs">
-                    <button className={authSpace === "public" ? "active" : ""} onClick={() => setAuthSpace("public")}>Пользователь</button>
-                    <button className={authSpace === "admin" ? "active" : ""} onClick={() => setAuthSpace("admin")}>Админка</button>
-                  </div>
-                  <div className="tabs">
-                    <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
-                    <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Вход</button>
-                  </div>
-                  {authSpace === "admin" ? (
-                    <p className="muted">Отдельный контур для администраторов. Первый администратор регистрируется здесь, следующих добавляют из админ-панели.</p>
-                  ) : (
-                    <p className="muted">Контур для студентов, экзаменуемых и кандидатов. Администраторы входят отдельно.</p>
-                  )}
-                  <form onSubmit={handleAuth} className="stack">
-                    {mode === "register" && <label className="auth-field">Имя и фамилия<input name="full_name" autoComplete="name" required minLength={2} /></label>}
-                    <label className="auth-field">Email<input name="email" type="email" autoComplete="email" required /></label>
-                    <label className="auth-field">Пароль<input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} /></label>
-                    <button className="primary" type="submit"><UserRound size={18} /> Продолжить</button>
-                  </form>
-                  <div className="test-account">
-                    <small>Тестовый аккаунт</small>
-                    <strong>{activeDemoScenario.accountEmail}</strong>
-                    <span>password123</span>
-                  </div>
-                  {error && <p className="error">{error}</p>}
-                </section>
+              <section className="auth-panel auth-entry-panel" aria-label="Форма доступа к TuneAI">
+                <div className="auth-space-switch" role="group" aria-label="Тип кабинета">
+                  <button
+                    type="button"
+                    className={authSpace === "public" ? "active" : ""}
+                    aria-pressed={authSpace === "public"}
+                    onClick={() => setAuthSpace("public")}
+                  >
+                    <UserRound size={19} />
+                    <span><strong>Личный кабинет</strong><small>Учёба и прохождение</small></span>
+                  </button>
+                  <button
+                    type="button"
+                    className={authSpace === "admin" ? "active" : ""}
+                    aria-pressed={authSpace === "admin"}
+                    onClick={() => setAuthSpace("admin")}
+                  >
+                    <Shield size={19} />
+                    <span><strong>Администрирование</strong><small>Настройка системы</small></span>
+                  </button>
+                </div>
+
+                <div className="auth-form-heading">
+                  <span>{authSpace === "admin" ? "Защищённый раздел" : "Личный кабинет"}</span>
+                  <h2>{mode === "login" ? "Войти в аккаунт" : "Регистрация"}</h2>
+                  <p>
+                    {mode === "login"
+                      ? "Используйте email и пароль, полученные при регистрации или от администратора."
+                      : authSpace === "admin"
+                        ? "Регистрация доступна для первого администратора. Остальных приглашает владелец системы."
+                        : "Создайте личный аккаунт, чтобы сохранять попытки и возвращаться к результатам."}
+                  </p>
+                </div>
+
+                <form onSubmit={handleAuth} className="stack auth-form">
+                  {mode === "register" && <label className="auth-field">Имя и фамилия<input name="full_name" autoComplete="name" required minLength={2} /></label>}
+                  <label className="auth-field">Email<input name="email" type="email" autoComplete="email" required /></label>
+                  <label className="auth-field">Пароль<input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} /></label>
+                  <button className="primary auth-submit" type="submit">
+                    {authSpace === "admin" ? <KeyRound size={18} /> : <UserRound size={18} />}
+                    {mode === "login" ? "Войти" : "Создать аккаунт"}
+                  </button>
+                </form>
+
+                <div className="auth-mode-switch">
+                  <span>{mode === "login" ? "Нет аккаунта?" : "Уже есть аккаунт?"}</span>
+                  <button type="button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
+                    {mode === "login" ? "Зарегистрироваться" : "Войти"}
+                  </button>
+                </div>
+                {error && <p className="error">{error}</p>}
               </section>
             </section>
           )}
@@ -2162,12 +2203,13 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     return (
       <main className="shell auth-shell" style={themeVars}>
         <section className="auth-panel password-change-panel">
-          <div className="panel-title"><KeyRound size={18} /> Смена временного пароля</div>
+          <span className="context-label">Безопасность аккаунта</span>
+          <h1><KeyRound size={22} /> Задайте новый пароль</h1>
           <p className="muted">Администратор выдал временный пароль. Задайте новый пароль перед работой с тестами.</p>
           {error && <div className="banner error">{error}</div>}
           <form onSubmit={changeTemporaryPassword} className="stack">
-            <input name="current_password" type="password" placeholder="Текущий временный пароль" required />
-            <input name="new_password" type="password" placeholder="Новый пароль" required minLength={8} />
+            <label className="auth-field">Текущий временный пароль<input name="current_password" type="password" autoComplete="current-password" required /></label>
+            <label className="auth-field">Новый пароль<input name="new_password" type="password" autoComplete="new-password" required minLength={8} /></label>
             <button className="primary" type="submit"><KeyRound size={17} /> Сменить пароль</button>
           </form>
           <button className="ghost" onClick={clearAuth}><LogOut size={17} /> Выйти</button>
@@ -2184,9 +2226,28 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     ...(canReviewAnswers ? [{ id: "review" as SectionId, label: "Проверка", icon: <CheckCircle2 size={17} /> }] : []),
     ...(user.role === "admin" ? [{ id: "admin" as SectionId, label: "Админка", icon: <Shield size={17} /> }] : [])
   ];
-  const mobileNavigation = navigation.length <= 5
-    ? navigation
-    : [...navigation.slice(0, 4), navigation[navigation.length - 1]];
+  const mobileOverflowNavigation = navigation.length > 5 ? navigation.slice(3, -1) : [];
+  const mobileNavigation = navigation.length > 5
+    ? [...navigation.slice(0, 3), navigation[navigation.length - 1]]
+    : navigation;
+  const mobileOverflowActive = mobileOverflowNavigation.some((item) => item.id === activeSection);
+  const openSection = (section: SectionId) => {
+    setActiveSection(section);
+    setMobileMenuOpen(false);
+  };
+
+  const renderMobileNavigationItem = (item: (typeof navigation)[number]) => (
+    <button
+      type="button"
+      key={item.id}
+      className={activeSection === item.id ? "active" : ""}
+      aria-current={activeSection === item.id ? "page" : undefined}
+      onClick={() => openSection(item.id)}
+    >
+      {item.icon}
+      <span>{item.label}</span>
+    </button>
+  );
 
   return (
     <main className="app-shell" style={themeVars}>
@@ -2204,7 +2265,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
               <button
                 key={item.id}
                 className={activeSection === item.id ? "active" : ""}
-                onClick={() => setActiveSection(item.id)}
+                onClick={() => openSection(item.id)}
               >
                 {item.icon}
                 {item.label}
@@ -2253,6 +2314,9 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
               <Activity size={17} /> Обновить
             </button>
           </div>
+          <button className="mobile-logout" type="button" onClick={clearAuth} aria-label={`Выйти из аккаунта ${user.full_name}`}>
+            <LogOut size={17} /> <span>Выйти</span>
+          </button>
         </header>
 
         {error && <div className="banner error">{error}</div>}
@@ -2424,19 +2488,47 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
         )}
       </section>
 
-      <nav className="mobile-nav" aria-label="Основная навигация">
-        {mobileNavigation.map((item) => (
-          <button
-            type="button"
-            key={item.id}
-            className={activeSection === item.id ? "active" : ""}
-            aria-current={activeSection === item.id ? "page" : undefined}
-            onClick={() => setActiveSection(item.id)}
-          >
-            {item.icon}
-            <span>{item.label}</span>
-          </button>
-        ))}
+      {mobileMenuOpen && mobileOverflowNavigation.length > 0 && (
+        <section className="mobile-overflow-menu" id="mobile-more-navigation" aria-label="Дополнительные разделы">
+          <span className="context-label">Дополнительные разделы</span>
+          {mobileOverflowNavigation.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              className={activeSection === item.id ? "active" : ""}
+              aria-current={activeSection === item.id ? "page" : undefined}
+              onClick={() => openSection(item.id)}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </section>
+      )}
+
+      <nav
+        className="mobile-nav"
+        aria-label="Основная навигация"
+        style={{ gridTemplateColumns: `repeat(${navigation.length > 5 ? 5 : navigation.length}, minmax(0, 1fr))` }}
+      >
+        {mobileNavigation.length <= 5 && mobileOverflowNavigation.length === 0
+          ? mobileNavigation.map(renderMobileNavigationItem)
+          : (
+            <>
+              {mobileNavigation.slice(0, 3).map(renderMobileNavigationItem)}
+              <button
+                type="button"
+                className={mobileMenuOpen || mobileOverflowActive ? "active" : ""}
+                aria-expanded={mobileMenuOpen}
+                aria-controls="mobile-more-navigation"
+                onClick={() => setMobileMenuOpen((open) => !open)}
+              >
+                <MoreHorizontal size={17} />
+                <span>Ещё</span>
+              </button>
+              {renderMobileNavigationItem(mobileNavigation[mobileNavigation.length - 1])}
+            </>
+          )}
       </nav>
     </main>
   );
@@ -3680,7 +3772,8 @@ function AnswerSubmitter({
 
   async function submitText(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const text = String(form.get("text") || "").trim();
     if (!text) {
       onError("Введите текст ответа.");
@@ -3691,7 +3784,7 @@ function AnswerSubmitter({
       await onTextSubmit(text);
       localStorage.removeItem(draftKey);
       onDraftChange?.(false);
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (err) {
       onError(getUserErrorMessage(err, "Не удалось отправить текстовый ответ."));
     } finally {

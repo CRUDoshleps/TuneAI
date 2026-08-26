@@ -6,6 +6,7 @@ x-backend-environment: &backend-environment
   POSTGRES_HOST: ${POSTGRES_HOST:?POSTGRES_HOST is required}
   YANDEX_FOLDER_ID: ${YANDEX_FOLDER_ID:-}
   YANDEX_MOCK: "false"
+  YANDEX_USE_METADATA_IAM: "true"
   YANDEX_DATA_LOGGING_ENABLED: "false"
   RUNTIME_AI_PROVIDER_CONFIG_ENABLED: ${RUNTIME_AI_PROVIDER_CONFIG_ENABLED:-true}
   CORS_ORIGINS: https://tuneai.vnshk.ru
@@ -16,9 +17,9 @@ x-backend-environment: &backend-environment
   STORAGE_BACKEND: local
   UPLOAD_DIR: /data/uploads
   MAX_UPLOAD_MB: "50"
-  DEMO_BOOTSTRAP_ENABLED: "false"
-  DEMO_BOOTSTRAP_LIMIT_PER_HOUR: ${DEMO_BOOTSTRAP_LIMIT_PER_HOUR:-30}
-  DEMO_BOOTSTRAP_TTL_HOURS: ${DEMO_BOOTSTRAP_TTL_HOURS:-24}
+  DEMO_BOOTSTRAP_ENABLED: "true"
+  DEMO_BOOTSTRAP_LIMIT_PER_HOUR: ${DEMO_BOOTSTRAP_LIMIT_PER_HOUR:-20}
+  DEMO_BOOTSTRAP_TTL_HOURS: ${DEMO_BOOTSTRAP_TTL_HOURS:-6}
   MOODLE_INTEGRATION_ENABLED: ${MOODLE_INTEGRATION_ENABLED:-false}
   MOODLE_INTEGRATION_TOKEN: ${MOODLE_INTEGRATION_TOKEN:-}
   MOODLE_INTEGRATION_SITE_ID: ${MOODLE_INTEGRATION_SITE_ID:-default}
@@ -52,7 +53,6 @@ x-backend-secrets: &backend-secrets
   - secret_key
   - postgres_password
   - rabbitmq_password
-  - yandex_api_key
 
 x-security: &security
   read_only: true
@@ -230,7 +230,6 @@ services:
       - secret_key
       - postgres_password
       - rabbitmq_password
-      - yandex_api_key
       - bootstrap_admin_email
       - bootstrap_admin_password
     networks:
@@ -265,8 +264,6 @@ secrets:
     file: /run/apps/tuneai/postgres_password
   rabbitmq_password:
     file: /run/apps/tuneai/rabbitmq_password
-  yandex_api_key:
-    file: /run/apps/tuneai/yandex_api_key
   bootstrap_admin_email:
     file: /run/apps/tuneai/bootstrap_admin_email
   bootstrap_admin_password:

@@ -22,6 +22,22 @@ def test_public_config_uses_runtime_environment(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["config"]["productName"] == "Campus Oral AI"
     assert response.json()["config"]["consultationEmail"] == "help@example.com"
+    assert response.json()["config"]["demoBootstrapEnabled"] is True
+
+
+def test_public_config_demo_capability_cannot_be_overridden_by_branding_json(client, monkeypatch):
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("DEMO_BOOTSTRAP_ENABLED", "false")
+    monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_CONFIG_JSON", '{"demoBootstrapEnabled": true}')
+    try:
+        response = client.get("/public/config")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    assert response.json()["config"]["demoBootstrapEnabled"] is False
 
 
 def test_public_config_ignores_blank_runtime_brand_values(client, monkeypatch):

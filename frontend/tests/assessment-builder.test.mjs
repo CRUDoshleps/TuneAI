@@ -35,6 +35,13 @@ test("test runner limits answer controls by question mode", () => {
   assert.match(appSource, /disabled=\{!canUseText\}/);
 });
 
+test("text submission keeps a stable form reference across async updates", () => {
+  assert.match(appSource, /const formElement = event\.currentTarget;/);
+  assert.match(appSource, /const form = new FormData\(formElement\);/);
+  assert.match(appSource, /await onTextSubmit\(text\);[\s\S]*?formElement\.reset\(\);/);
+  assert.doesNotMatch(appSource, /await onTextSubmit\(text\);[\s\S]*?event\.currentTarget\.reset\(\);/);
+});
+
 test("structured evaluator skill controls are wired to api payload", () => {
   assert.match(appSource, /function buildSkillPayloadFromForm/);
   for (const field of [

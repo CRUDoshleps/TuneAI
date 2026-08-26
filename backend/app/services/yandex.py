@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import time
 from typing import Any
 
 import httpx
@@ -22,23 +23,67 @@ class YandexAIClient:
         self.credentials = credentials or {}
         self.config = config or {}
         self.mock_override = mock_override
+        self._metadata_token: str | None = None
+        self._metadata_token_expires_at = 0.0
+        self._metadata_token_lock = asyncio.Lock()
 
     @property
     def auth_headers(self) -> dict[str, str]:
-        headers = {
-            "Content-Type": "application/json",
-            "x-data-logging-enabled": str(self._config_bool("data_logging_enabled", self.settings.yandex_data_logging_enabled)).lower(),
-        }
+        headers = self._base_headers()
         if self.api_key:
             headers["Authorization"] = f"Api-Key {self.api_key}"
         elif self.iam_token:
             headers["Authorization"] = f"Bearer {self.iam_token}"
+        return headers
+
+    def _base_headers(self) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "x-data-logging-enabled": str(self._config_bool("data_logging_enabled", self.settings.yandex_data_logging_enabled)).lower(),
+        }
         if self.folder_id:
             headers["x-folder-id"] = self.folder_id
         return headers
 
+    async def _authenticated_headers(self) -> dict[str, str]:
+        if not self.settings.yandex_use_metadata_iam:
+            return self.auth_headers
+        headers = self._base_headers()
+        headers["Authorization"] = f"Bearer {await self._metadata_iam_token()}"
+        return headers
+
+    async def _metadata_iam_token(self) -> str:
+        now = time.monotonic()
+        if self._metadata_token and now < self._metadata_token_expires_at:
+            return self._metadata_token
+        async with self._metadata_token_lock:
+            now = time.monotonic()
+            if self._metadata_token and now < self._metadata_token_expires_at:
+                return self._metadata_token
+            async with httpx.AsyncClient(timeout=5) as client:
+                response = await client.get(
+                    self.settings.yandex_metadata_url,
+                    headers={"Metadata-Flavor": "Google"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+            token = str(payload.get("access_token") or "").strip()
+            if not token:
+                raise RuntimeError("Yandex metadata response did not include an IAM token")
+            try:
+                expires_in = int(payload.get("expires_in") or 3600)
+            except (TypeError, ValueError):
+                expires_in = 3600
+            refresh_in = max(
+                1,
+                expires_in - self.settings.yandex_metadata_token_refresh_skew_seconds,
+            )
+            self._metadata_token = token
+            self._metadata_token_expires_at = time.monotonic() + refresh_in
+            return token
+
     def _ensure_real_credentials(self) -> None:
-        if not (self.api_key or self.iam_token):
+        if not (self.settings.yandex_use_metadata_iam or self.api_key or self.iam_token):
             raise RuntimeError("Yandex AI credentials are not configured")
         if not self.folder_id:
             raise RuntimeError("Yandex folder ID is not configured")
@@ -114,8 +159,9 @@ class YandexAIClient:
                 "textNormalization": {"textNormalization": "TEXT_NORMALIZATION_ENABLED"},
             },
         }
+        headers = await self._authenticated_headers()
         async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(self._config_str("speechkit_recognize_url", self.settings.speechkit_recognize_url), headers=self.auth_headers, json=body)
+            response = await client.post(self._config_str("speechkit_recognize_url", self.settings.speechkit_recognize_url), headers=headers, json=body)
             response.raise_for_status()
             operation = response.json()
             operation_id = operation.get("id")
@@ -123,14 +169,14 @@ class YandexAIClient:
                 return self._extract_transcript(operation)
             for _ in range(60):
                 result = await client.get(
-                    f"{self._config_str('speechkit_operation_url', self.settings.speechkit_operation_url).rstrip('/')}/{operation_id}", headers=self.auth_headers
+                    f"{self._config_str('speechkit_operation_url', self.settings.speechkit_operation_url).rstrip('/')}/{operation_id}", headers=headers
                 )
                 result.raise_for_status()
                 payload = result.json()
                 if payload.get("done"):
                     recognition = await client.get(
                         self._config_str("speechkit_result_url", self.settings.speechkit_result_url),
-                        headers=self.auth_headers,
+                        headers=headers,
                         params={"operation_id": operation_id},
                     )
                     recognition.raise_for_status()
@@ -205,8 +251,9 @@ class YandexAIClient:
             ],
             "jsonSchema": {"schema": self._evaluation_response_schema()},
         }
+        headers = await self._authenticated_headers()
         async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(self._config_str("completion_url", self.settings.yandex_completion_url), headers=self.auth_headers, json=body)
+            response = await client.post(self._config_str("completion_url", self.settings.yandex_completion_url), headers=headers, json=body)
             response.raise_for_status()
             text = self._extract_completion_text(response.json())
         return EvaluationResult.model_validate_json(self._extract_json(text))
@@ -245,8 +292,9 @@ class YandexAIClient:
         self._ensure_real_credentials()
 
         body = {"modelUri": model_uri, "text": text[:8000]}
+        headers = await self._authenticated_headers()
         async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(self._config_str("embedding_url", self.settings.yandex_embedding_url), headers=self.auth_headers, json=body)
+            response = await client.post(self._config_str("embedding_url", self.settings.yandex_embedding_url), headers=headers, json=body)
             response.raise_for_status()
             payload = response.json()
         embedding = payload.get("embedding") or payload.get("result", {}).get("embedding")

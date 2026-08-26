@@ -164,7 +164,7 @@ Authorization: Bearer <user-access-token>
 - Для service-to-service интеграций используйте backend внешней платформы.
 - Ограничивайте видимость тестов назначениями и ролями.
 - Для iframe не используйте `X-Frame-Options: DENY`; вместо этого задавайте `Content-Security-Policy: frame-ancestors 'self' https://your-site.example`.
-- Для production отключайте публичный demo bootstrap: `DEMO_BOOTSTRAP_ENABLED=false`.
+- Если публичное демо не требуется, отключайте bootstrap через `DEMO_BOOTSTRAP_ENABLED=false`. Для публичного production обязательно задавайте ограниченный часовой лимит и TTL.
 - Добавляйте cleanup временных пользователей и тестов для демо-контуров.
 
 ## Если позже понадобится widget SDK

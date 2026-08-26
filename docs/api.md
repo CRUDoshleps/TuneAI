@@ -186,6 +186,6 @@ Endpoints защищены `X-TuneAI-Integration-Key` и используютс�
 POST /public/demo/bootstrap
 ```
 
-Работает только при `DEMO_BOOTSTRAP_ENABLED=true`. В production этот режим нужно отключать.
+Работает только при `DEMO_BOOTSTRAP_ENABLED=true`. Для публичного production задайте ограниченный часовой лимит и TTL; в закрытом self-host контуре режим можно отключить.
 
 Демо-пользователи и демо-тесты создаются с TTL. Backend чистит истекшие демо-данные при новом bootstrap-запросе и ограничивает количество новых демо-пользователей в час.

@@ -15,7 +15,6 @@ read_secret() {
 read_secret SECRET_KEY /run/secrets/secret_key
 read_secret POSTGRES_PASSWORD /run/secrets/postgres_password
 read_secret RABBITMQ_PASSWORD /run/secrets/rabbitmq_password
-read_secret YANDEX_API_KEY /run/secrets/yandex_api_key
 
 if [ -r /run/secrets/bootstrap_admin_email ]; then
     read_secret BOOTSTRAP_ADMIN_EMAIL /run/secrets/bootstrap_admin_email

@@ -1,6 +1,6 @@
 export type DemoFlow = "builder" | "materials" | "take";
 export type PlatformRole = "student" | "examinee" | "candidate" | "methodist" | "teacher" | "interviewer" | "admin";
-export type PublicView = "home" | "demo";
+export type PublicView = "home" | "demo" | "auth";
 export type PlatformTemplate = "unconfigured" | "official";
 
 export type PlatformTheme = {
@@ -53,6 +53,7 @@ export type DemoScenarioConfig = {
 
 export type PlatformConfig = {
   template: PlatformTemplate;
+  demoBootstrapEnabled: boolean;
   productName: string;
   logoText: string;
   logoUrl?: string;
@@ -85,6 +86,7 @@ export type PlatformConfig = {
 
 const officialConfig: PlatformConfig = {
   template: "official",
+  demoBootstrapEnabled: true,
   productName: "TuneAI",
   logoText: "TuneAI",
   repositoryUrl: "https://github.com/CRUDoshleps/TuneAI",
