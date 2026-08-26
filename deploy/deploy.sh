@@ -10,6 +10,7 @@ readonly app_dir="/srv/apps/tuneai"
 readonly compose_file="$app_dir/deploy/compose.yaml"
 readonly env_file="$app_dir/deploy/.env.production"
 readonly state_file="$app_dir/deploy/.deployed-tag"
+readonly release_config_dir="$app_dir/deploy/releases"
 readonly lock_file="/run/lock/tuneai-deploy.lock"
 readonly new_tag="$1"
 readonly expected_revision="${BASH_REMATCH[1]}"
@@ -62,13 +63,14 @@ unset iam_token
 
 wait_containers_healthy() {
     local tag="$1"
+    local active_compose_file="${2:-$compose_file}"
     local deadline=$((SECONDS + 240))
     local service container status all_healthy
 
     while ((SECONDS < deadline)); do
         all_healthy=true
         for service in rabbitmq backend worker frontend; do
-            container="$(IMAGE_TAG="$tag" docker compose --project-name tuneai --file "$compose_file" ps -q "$service")"
+            container="$(IMAGE_TAG="$tag" docker compose --project-name tuneai --file "$active_compose_file" ps -q "$service")"
             if [[ -z "$container" ]]; then
                 all_healthy=false
                 break
@@ -101,7 +103,7 @@ wait_external_health() {
 }
 
 prune_old_release_images() {
-    local repository reference
+    local repository reference snapshot snapshot_name
 
     for repository in backend frontend; do
         while IFS= read -r reference; do
@@ -113,15 +115,31 @@ prune_old_release_images() {
         done < <(docker image ls "${REGISTRY_IMAGE}/${repository}" --format '{{.Repository}}:{{.Tag}}')
     done
     docker image prune --force >/dev/null 2>&1 || true
+
+    if [[ -d "$release_config_dir" ]]; then
+        while IFS= read -r -d '' snapshot; do
+            snapshot_name="$(basename "$snapshot")"
+            if [[ "$snapshot_name" != "${new_tag}.compose.yaml" \
+                && "$snapshot_name" != "${previous_tag}.compose.yaml" ]]
+            then
+                rm -f -- "$snapshot"
+            fi
+        done < <(find "$release_config_dir" -maxdepth 1 -type f -name 'sha-*.compose.yaml' -print0)
+    fi
 }
 
 rollback() {
     local exit_code=$?
+    local rollback_compose_file="$release_config_dir/${previous_tag}.compose.yaml"
     trap - ERR
     echo "Deployment failed; restoring the previous TuneAI image." >&2
     if [[ "$previous_tag" =~ ^(sha-)?[0-9a-f]{40}$ ]]; then
-        IMAGE_TAG="$previous_tag" docker compose --project-name tuneai --file "$compose_file" up -d --remove-orphans || true
-        wait_containers_healthy "$previous_tag" || true
+        if [[ ! -r "$rollback_compose_file" ]]; then
+            echo "No saved Compose config for $previous_tag; using the current config." >&2
+            rollback_compose_file="$compose_file"
+        fi
+        IMAGE_TAG="$previous_tag" docker compose --project-name tuneai --file "$rollback_compose_file" up -d --remove-orphans || true
+        wait_containers_healthy "$previous_tag" "$rollback_compose_file" || true
     fi
     exit "$exit_code"
 }
@@ -134,6 +152,11 @@ IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file"
 wait_containers_healthy "$new_tag"
 IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" run --rm --no-deps backend python -m app.scripts.check_ai
 wait_external_health "$expected_revision"
+
+install -d -o root -g root -m 0755 "$release_config_dir"
+temporary_compose="$(mktemp "$release_config_dir/.${new_tag}.compose.yaml.XXXXXX")"
+install -o root -g root -m 0644 "$compose_file" "$temporary_compose"
+mv -f -- "$temporary_compose" "$release_config_dir/${new_tag}.compose.yaml"
 
 temporary_env="$(mktemp "$app_dir/deploy/.env.production.XXXXXX")"
 awk -v tag="$new_tag" '

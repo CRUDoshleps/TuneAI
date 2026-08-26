@@ -234,6 +234,7 @@ services:
       - secret_key
       - postgres_password
       - rabbitmq_password
+      - yandex_api_key
       - bootstrap_admin_email
       - bootstrap_admin_password
     networks:

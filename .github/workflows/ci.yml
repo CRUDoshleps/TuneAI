@@ -208,7 +208,7 @@ jobs:
           POSTGRES_HOST: postgres.example.internal
           YANDEX_FOLDER_ID: example00000000000000
         run: |
-          docker compose -f deploy/compose.yaml config --format json >/tmp/tuneai-production-compose.json
+          docker compose --profile tools -f deploy/compose.yaml config --format json >/tmp/tuneai-production-compose.json
           python - <<'PY'
           import json
 
@@ -216,6 +216,8 @@ jobs:
               services = json.load(compose_file)["services"]
           environment = services["backend"]["environment"]
           assert environment["YANDEX_USE_METADATA_IAM"] == "false"
+          bootstrap_secrets = {entry["source"] for entry in services["bootstrap-admin"]["secrets"]}
+          assert "yandex_api_key" in bootstrap_secrets
           assert environment["DEMO_BOOTSTRAP_ENABLED"] == "true"
           assert environment["DEMO_BOOTSTRAP_LIMIT_PER_HOUR"] == "20"
           assert environment["DEMO_BOOTSTRAP_TTL_HOURS"] == "6"
