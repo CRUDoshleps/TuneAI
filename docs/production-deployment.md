@@ -26,8 +26,9 @@ push/merge в trunk-ветку `main`. Ручной повторный запу�
 7. Перед фиксацией релиза host выполняет embedding + completion deep probe,
    затем проверяет контейнеры и внешний `https://tuneai.vnshk.ru/api/health`
    с точным git SHA.
-8. При ошибке приложение возвращается на предыдущий image tag. Миграции БД не
-   откатываются, поэтому изменения схемы для обычного merge должны следовать
+8. При ошибке приложение возвращается на предыдущий image tag вместе с
+   сохранённым Compose-снимком этого релиза. Миграции БД не откатываются,
+   поэтому изменения схемы для обычного merge должны следовать
    expand/migrate/contract и оставаться совместимыми с предыдущей версией.
 9. `tuneai-health.timer` раз в минуту проверяет внешний readiness с production
    PostgreSQL, AI readiness, точный deployed SHA, health контейнеров, rollout
