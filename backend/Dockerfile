@@ -28,6 +28,7 @@ RUN pip install --no-cache-dir --no-compile -r requirements.txt
 COPY backend/app ./app
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/alembic ./alembic
+COPY deploy /opt/tuneai-deploy
 COPY deploy/backend-entrypoint.sh /usr/local/bin/tuneai-entrypoint
 
 RUN chmod 0555 /usr/local/bin/tuneai-entrypoint \

@@ -17,6 +17,8 @@ push/merge в trunk-ветку `main`. Ручной повторный запу�
    keys в GitHub не хранятся.
 5. `tuneai-deploy.timer` на VM раз в минуту выбирает только последний git SHA,
    который присутствует одновременно в backend и frontend repositories.
+   Из backend image этого же SHA watcher извлекает проверенный CI deploy bundle
+   и атомарно обновляет host Compose/scripts до запуска rollout.
 6. Host получает application secrets из Lockbox своей instance identity,
    выполняет Alembic migrations и обновляет Compose stack. Backend и worker
    используют Yandex API key из Lockbox: metadata service VM недоступен через

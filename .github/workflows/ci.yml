@@ -208,7 +208,7 @@ jobs:
           POSTGRES_HOST: postgres.example.internal
           YANDEX_FOLDER_ID: example00000000000000
         run: |
-          docker compose -f deploy/compose.yaml config --format json >/tmp/tuneai-production-compose.json
+          docker compose --profile tools -f deploy/compose.yaml config --format json >/tmp/tuneai-production-compose.json
           python - <<'PY'
           import json
 
@@ -219,8 +219,11 @@ jobs:
           assert environment["DEMO_BOOTSTRAP_ENABLED"] == "true"
           assert environment["DEMO_BOOTSTRAP_LIMIT_PER_HOUR"] == "20"
           assert environment["DEMO_BOOTSTRAP_TTL_HOURS"] == "6"
+          assert any(secret["source"] == "yandex_api_key" for secret in services["bootstrap-admin"]["secrets"])
           PY
           grep -q 'app.scripts.check_ai' deploy/deploy.sh
+          grep -q '/opt/tuneai-deploy' backend/Dockerfile
+          grep -q 'sync_release_deploy_files' deploy/watch-registry.sh
 
   release:
     name: Publish and deploy production
@@ -387,19 +390,30 @@ jobs:
 
       - name: Wait for VM rollout and verify exact revision
         run: |
+          stable_checks=0
           for attempt in {1..90}; do
             body="$(curl --fail --silent --show-error --max-time 5 "$HEALTH_URL" || true)"
             if jq -e --arg revision "$GITHUB_SHA" \
               '.status == "ok" and .version == $revision' <<<"$body" >/dev/null 2>&1
             then
               config="$(curl --fail --silent --show-error --max-time 5 "$PUBLIC_ORIGIN/api/public/config" || true)"
+              ai_readiness="$(curl --fail --silent --show-error --max-time 30 "$PUBLIC_ORIGIN/api/readiness/ai/deep" || true)"
               if curl --fail --silent --show-error --max-time 5 "$PUBLIC_ORIGIN/" >/dev/null \
                 && jq -e '.config.template == "official" and .config.productName == "TuneAI" and .config.demoBootstrapEnabled == true' \
-                  <<<"$config" >/dev/null 2>&1
+                  <<<"$config" >/dev/null 2>&1 \
+                && jq -e '.status == "ready" and (.details | contains("Embedding")) and (.details | contains("completion"))' \
+                  <<<"$ai_readiness" >/dev/null 2>&1
               then
-                echo "TuneAI ${GITHUB_SHA} is healthy and serves the official production UI"
-                exit 0
+                stable_checks=$((stable_checks + 1))
+                if [[ "$stable_checks" -ge 2 ]]; then
+                  echo "TuneAI ${GITHUB_SHA} is stably healthy, AI-ready, and serves the official production UI"
+                  exit 0
+                fi
+              else
+                stable_checks=0
               fi
+            else
+              stable_checks=0
             fi
             sleep 10
           done

@@ -39,7 +39,6 @@ list_images() {
 
 backend_payload="$(list_images backend)"
 frontend_payload="$(list_images frontend)"
-unset token
 
 tag="$(
     jq -er --argjson frontend "$frontend_payload" '
@@ -56,8 +55,55 @@ tag="$(
 )"
 
 if [[ ! "$tag" =~ ^sha-[0-9a-f]{40}$ ]]; then
+    unset token
     echo "No complete immutable TuneAI release is available yet."
     exit 0
 fi
+
+sync_release_deploy_files() (
+    set -euo pipefail
+    local bundle_dir container docker_config file image mode
+    local -a files=(
+        compose.yaml
+        deploy.sh
+        fetch-secrets.sh
+        monitor-health.sh
+        rabbitmq-entrypoint.sh
+        watch-registry.sh
+    )
+
+    bundle_dir="$(mktemp -d /run/apps/tuneai/deploy-bundle.XXXXXX)"
+    docker_config="$(mktemp -d /run/tuneai-docker.XXXXXX)"
+    container=""
+    cleanup() {
+        [[ -z "$container" ]] || docker rm --force "$container" >/dev/null 2>&1 || true
+        rm -rf -- "$bundle_dir" "$docker_config"
+    }
+    trap cleanup EXIT
+
+    export DOCKER_CONFIG="$docker_config"
+    printf '%s' "$token" | docker login --username iam --password-stdin cr.yandex >/dev/null
+    image="${REGISTRY_IMAGE}/backend:${tag}"
+    docker pull "$image" >/dev/null
+    container="$(docker create "$image")"
+    docker cp "${container}:/opt/tuneai-deploy/." "$bundle_dir"
+    docker rm "$container" >/dev/null
+    container=""
+
+    for file in deploy.sh fetch-secrets.sh monitor-health.sh rabbitmq-entrypoint.sh watch-registry.sh; do
+        bash -n "${bundle_dir}/${file}"
+    done
+    IMAGE_TAG="$tag" docker compose --profile tools --project-name tuneai \
+        --file "${bundle_dir}/compose.yaml" config >/dev/null
+
+    for file in "${files[@]}"; do
+        mode=0644
+        [[ "$file" == *.sh ]] && mode=0755
+        install -o root -g root -m "$mode" "${bundle_dir}/${file}" "$app_dir/deploy/${file}"
+    done
+)
+
+sync_release_deploy_files
+unset token
 
 exec "$app_dir/deploy/deploy.sh" "$tag"
