@@ -3,7 +3,7 @@ version: 2
 updates:
   - package-ecosystem: pip
     directory: /backend
-    target-branch: dev
+    target-branch: main
     schedule:
       interval: weekly
       day: monday
@@ -18,7 +18,7 @@ updates:
 
   - package-ecosystem: npm
     directory: /frontend
-    target-branch: dev
+    target-branch: main
     schedule:
       interval: weekly
       day: monday
@@ -30,10 +30,17 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
-    target-branch: dev
+    target-branch: main
     schedule:
       interval: weekly
       day: monday
@@ -47,7 +54,7 @@ updates:
 
   - package-ecosystem: docker
     directory: /backend
-    target-branch: dev
+    target-branch: main
     schedule:
       interval: weekly
       day: monday
@@ -57,10 +64,14 @@ updates:
 
   - package-ecosystem: docker
     directory: /frontend
-    target-branch: dev
+    target-branch: main
     schedule:
       interval: weekly
       day: monday
       time: "07:00"
       timezone: Europe/Moscow
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
