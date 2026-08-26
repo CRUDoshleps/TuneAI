@@ -152,7 +152,7 @@ frontend -> backend -> RabbitMQ -> worker -> AI provider
               PostgreSQL   MinIO
 ```
 
-Стек: Next.js, FastAPI, PostgreSQL, RabbitMQ, MinIO, Docker Compose. Для локальной разработки можно использовать mock AI. Для production заполните реальные credentials и отключите публичный demo bootstrap.
+Стек: Next.js, FastAPI, PostgreSQL, RabbitMQ, MinIO, Docker Compose. Для локальной разработки можно использовать mock AI. Для self-host production заполните реальные credentials; публичный demo bootstrap либо отключите, либо ограничьте часовым лимитом и коротким TTL. Официальный deployment использует IAM-токен сервисного аккаунта VM вместо статического Yandex API key.
 
 ## Проверка
 

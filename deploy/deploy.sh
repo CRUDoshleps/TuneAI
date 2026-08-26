@@ -132,6 +132,7 @@ IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file"
 IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" run --rm bootstrap-admin
 IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" up -d --remove-orphans
 wait_containers_healthy "$new_tag"
+IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" run --rm --no-deps backend python -m app.scripts.check_ai
 wait_external_health "$expected_revision"
 
 temporary_env="$(mktemp "$app_dir/deploy/.env.production.XXXXXX")"

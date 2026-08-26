@@ -5,7 +5,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -17,7 +17,7 @@ from app.core.logging import configure_logging
 from app.db.session import SessionLocal, get_db, init_db
 from app.metrics import REQUESTS, metrics_response
 from app.schemas import AIReadiness
-from app.services.ai_provider_runtime import active_provider_readiness
+from app.services.ai_provider_runtime import active_provider_readiness, probe_active_ai_provider
 
 
 configure_logging()
@@ -99,7 +99,11 @@ def ai_readiness(db: Session = Depends(get_db)) -> AIReadiness:
     db_readiness = active_provider_readiness(db, settings)
     if db_readiness:
         return db_readiness
-    has_credentials = bool(settings.yandex_api_key or settings.yandex_iam_token)
+    has_credentials = bool(
+        settings.yandex_use_metadata_iam
+        or settings.yandex_api_key
+        or settings.yandex_iam_token
+    )
     configured = settings.yandex_mock or bool(has_credentials and settings.yandex_folder_id)
     mode = "mock" if settings.yandex_mock else "real"
     disclosure = (
@@ -117,6 +121,19 @@ def ai_readiness(db: Session = Depends(get_db)) -> AIReadiness:
         review_confidence_threshold=settings.review_confidence_threshold,
         disclosure=disclosure,
     )
+
+
+@app.get("/readiness/ai/deep", tags=["system"])
+async def deep_ai_readiness(db: Session = Depends(get_db)) -> dict[str, str]:
+    readiness = ai_readiness(db)
+    if not readiness.configured:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Active AI provider is not configured")
+    try:
+        details = await probe_active_ai_provider(db, settings)
+    except Exception as exc:
+        logger.error("ai_deep_readiness_failed", error=str(exc))
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Active AI provider failed its operational probe") from exc
+    return {"status": "ready", "provider": readiness.provider, "details": details}
 
 
 if settings.metrics_enabled:

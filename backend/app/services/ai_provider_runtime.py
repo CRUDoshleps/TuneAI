@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 from typing import Any, Protocol
 
 import httpx
@@ -46,7 +47,7 @@ class OpenAICompatibleClient:
         self.config = profile.config or {}
 
     async def transcribe_audio(self, audio: bytes, content_type: str | None) -> str:
-        if self.settings.yandex_api_key or self.settings.yandex_iam_token or self.settings.yandex_mock:
+        if _yandex_runtime_available(self.settings):
             return await YandexAIClient(self.settings).transcribe_audio(audio, content_type)
         raise RuntimeError("Active AI provider does not support audio transcription. Use text answers or configure Yandex SpeechKit")
 
@@ -169,7 +170,7 @@ def active_provider_readiness(db: Session, settings: Settings | None = None) -> 
     )
     if not active:
         return None
-    configured = _profile_configured(active)
+    configured = _profile_configured(active, settings)
     provider_name = {
         AIProviderEnum.mock: "Mock AI",
         AIProviderEnum.yandex: "Yandex AI Studio",
@@ -183,7 +184,7 @@ def active_provider_readiness(db: Session, settings: Settings | None = None) -> 
         AIProviderEnum.local: ["Local chat model", "Local embeddings", "RAG"],
     }[active.provider]
     if active.provider in {AIProviderEnum.openai_compatible, AIProviderEnum.local} and (
-        settings.yandex_api_key or settings.yandex_iam_token or settings.yandex_mock
+        _yandex_runtime_available(settings)
     ):
         capabilities = ["Yandex SpeechKit STT", *capabilities]
     return AIReadiness(
@@ -197,18 +198,56 @@ def active_provider_readiness(db: Session, settings: Settings | None = None) -> 
     )
 
 
-def _profile_configured(profile: AIProviderConfig) -> bool:
+def _profile_configured(profile: AIProviderConfig, settings: Settings) -> bool:
     credentials = profile.credentials or {}
     config = profile.config or {}
     if profile.provider == AIProviderEnum.mock:
         return True
     if profile.provider == AIProviderEnum.yandex:
-        return bool((credentials.get("api_key") or credentials.get("iam_token")) and credentials.get("folder_id"))
+        has_credentials = bool(
+            settings.yandex_use_metadata_iam
+            or credentials.get("api_key")
+            or credentials.get("iam_token")
+            or settings.yandex_api_key
+            or settings.yandex_iam_token
+        )
+        return bool(has_credentials and (credentials.get("folder_id") or settings.yandex_folder_id))
     has_chat = bool(config.get("base_url") or config.get("chat_completion_url"))
     has_embeddings = bool(config.get("base_url") or config.get("embedding_url"))
     if profile.provider == AIProviderEnum.local:
         return bool(has_chat and has_embeddings)
     return bool(credentials.get("api_key") and has_chat and has_embeddings)
+
+
+def _yandex_runtime_available(settings: Settings) -> bool:
+    return bool(
+        settings.yandex_mock
+        or settings.yandex_use_metadata_iam
+        or settings.yandex_api_key
+        or settings.yandex_iam_token
+    )
+
+
+async def probe_active_ai_provider(db: Session, settings: Settings | None = None) -> str:
+    """Exercise both embeddings and completion using the active runtime profile."""
+    settings = settings or get_settings()
+    client = get_active_ai_client(db, settings)
+    if settings.app_env == "production" and isinstance(client, YandexAIClient) and client.mock_mode:
+        raise RuntimeError("Mock AI cannot pass the production deep readiness probe")
+    embedding = await client.embed_query("TuneAI operational readiness check")
+    if not embedding or not all(math.isfinite(float(value)) for value in embedding):
+        raise RuntimeError("AI embedding probe returned an invalid vector")
+    evaluation = await client.evaluate_answer(
+        question="What is a readiness check?",
+        expected_answer="A readiness check confirms that a dependency can serve requests.",
+        transcript="It confirms that the dependency can serve requests.",
+        criteria={"rubric": "Check semantic equivalence."},
+        rag_context=[],
+        max_score=1,
+    )
+    if not evaluation.feedback.strip():
+        raise RuntimeError("AI completion probe returned an empty evaluation")
+    return f"Embedding ({len(embedding)} dimensions) and completion probes passed"
 
 
 def _extract_json(text: str) -> str:

@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     yandex_folder_id: str | None = None
     yandex_api_key: str | None = None
     yandex_iam_token: str | None = None
+    yandex_use_metadata_iam: bool = False
+    yandex_metadata_url: str = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token"
+    yandex_metadata_token_refresh_skew_seconds: int = Field(default=60, ge=0, le=600)
     yandex_gpt_model_uri: str | None = None
     yandex_lite_model_uri: str | None = None
     yandex_embed_doc_uri: str | None = None
@@ -157,7 +160,10 @@ class Settings(BaseSettings):
         if self.yandex_mock:
             errors.append("YANDEX_MOCK must be false")
         if self.demo_bootstrap_enabled:
-            errors.append("DEMO_BOOTSTRAP_ENABLED must be false")
+            if not 1 <= self.demo_bootstrap_limit_per_hour <= 60:
+                errors.append("DEMO_BOOTSTRAP_LIMIT_PER_HOUR must be between 1 and 60")
+            if not 1 <= self.demo_bootstrap_ttl_hours <= 24:
+                errors.append("DEMO_BOOTSTRAP_TTL_HOURS must be between 1 and 24")
         if self.moodle_integration_enabled:
             if not self.moodle_integration_token or len(self.moodle_integration_token) < 32:
                 errors.append("MOODLE_INTEGRATION_TOKEN must contain at least 32 characters")
@@ -165,7 +171,11 @@ class Settings(BaseSettings):
                 errors.append("MOODLE_INTEGRATION_SITE_ID must identify the trusted Moodle instance")
             if not self.moodle_integration_owner_emails:
                 errors.append("MOODLE_INTEGRATION_OWNER_EMAILS must scope tests exposed to Moodle")
-        if not self.runtime_ai_provider_config_enabled and not (self.yandex_api_key or self.yandex_iam_token):
+        if self.yandex_use_metadata_iam and not self.yandex_folder_id:
+            errors.append("YANDEX_FOLDER_ID is required when metadata IAM is enabled")
+        if not self.runtime_ai_provider_config_enabled and not (
+            self.yandex_use_metadata_iam or self.yandex_api_key or self.yandex_iam_token
+        ):
             errors.append("Yandex credentials are required")
         if not self.runtime_ai_provider_config_enabled and not self.yandex_folder_id:
             errors.append("YANDEX_FOLDER_ID is required")

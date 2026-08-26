@@ -63,6 +63,46 @@ def test_production_moodle_integration_requires_scoped_credentials():
         settings.validate_production()
 
 
+def test_production_allows_bounded_public_demo_and_metadata_iam():
+    settings = Settings(
+        app_env="production",
+        secret_key="production-secret-key-that-is-not-default",
+        yandex_mock=False,
+        yandex_use_metadata_iam=True,
+        yandex_folder_id="production-folder",
+        demo_bootstrap_enabled=True,
+        demo_bootstrap_limit_per_hour=20,
+        demo_bootstrap_ttl_hours=6,
+    )
+
+    settings.validate_production()
+
+
+@pytest.mark.parametrize(
+    ("limit", "ttl", "message"),
+    [
+        (0, 6, "DEMO_BOOTSTRAP_LIMIT_PER_HOUR"),
+        (61, 6, "DEMO_BOOTSTRAP_LIMIT_PER_HOUR"),
+        (20, 0, "DEMO_BOOTSTRAP_TTL_HOURS"),
+        (20, 25, "DEMO_BOOTSTRAP_TTL_HOURS"),
+    ],
+)
+def test_production_rejects_unbounded_public_demo(limit, ttl, message):
+    settings = Settings(
+        app_env="production",
+        secret_key="production-secret-key-that-is-not-default",
+        yandex_mock=False,
+        yandex_use_metadata_iam=True,
+        yandex_folder_id="production-folder",
+        demo_bootstrap_enabled=True,
+        demo_bootstrap_limit_per_hour=limit,
+        demo_bootstrap_ttl_hours=ttl,
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        settings.validate_production()
+
+
 def test_public_tuneai_settings_accept_next_public_aliases(monkeypatch):
     monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_PRODUCT_NAME", "Runtime Product")
     monkeypatch.setenv("NEXT_PUBLIC_TUNEAI_CONSULTATION_EMAIL", "runtime@example.com")
