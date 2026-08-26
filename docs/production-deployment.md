@@ -23,6 +23,12 @@ push/merge в trunk-ветку `main`. Ручной повторный запу�
 7. При ошибке приложение возвращается на предыдущий image tag. Миграции БД не
    откатываются, поэтому изменения схемы для обычного merge должны следовать
    expand/migrate/contract и оставаться совместимыми с предыдущей версией.
+8. `tuneai-health.timer` раз в минуту проверяет внешний readiness с production
+   PostgreSQL, AI readiness, точный deployed SHA, health контейнеров, rollout
+   timer и заполнение системного диска.
+9. После успешного rollout host сохраняет текущий и предыдущий TuneAI image для
+   rollback, а более старые локальные TuneAI images удаляет. Registry хранит
+   более длинную историю релизов по отдельной lifecycle policy.
 
 ## GitHub configuration
 
@@ -82,9 +88,12 @@ sudo systemctl start tuneai-deploy.service
 
 ```bash
 systemctl status tuneai-deploy.timer
+systemctl status tuneai-health.timer
+journalctl -u tuneai-health.service --since today
 journalctl -u tuneai-deploy.service --since today
 docker compose --project-name tuneai -f /srv/apps/tuneai/deploy/compose.yaml ps
 curl -fsS https://tuneai.vnshk.ru/api/health | jq
+curl -fsS https://tuneai.vnshk.ru/api/readiness | jq
 ```
 
 Ручной rollback использует предыдущий immutable tag:
