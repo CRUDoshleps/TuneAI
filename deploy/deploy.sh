@@ -100,6 +100,21 @@ wait_external_health() {
     return 1
 }
 
+prune_old_release_images() {
+    local repository reference
+
+    for repository in backend frontend; do
+        while IFS= read -r reference; do
+            if [[ "$reference" != "${REGISTRY_IMAGE}/${repository}:${new_tag}" \
+                && "$reference" != "${REGISTRY_IMAGE}/${repository}:${previous_tag}" ]]
+            then
+                docker image rm "$reference" >/dev/null 2>&1 || true
+            fi
+        done < <(docker image ls "${REGISTRY_IMAGE}/${repository}" --format '{{.Repository}}:{{.Tag}}')
+    done
+    docker image prune --force >/dev/null 2>&1 || true
+}
+
 rollback() {
     local exit_code=$?
     trap - ERR
@@ -135,4 +150,5 @@ printf '%s\n' "$new_tag" >"$temporary_state"
 chmod 0644 "$temporary_state"
 mv -f -- "$temporary_state" "$state_file"
 trap - ERR
+prune_old_release_images
 echo "TuneAI ${expected_revision} is healthy."

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run TuneAI production health monitoring every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+RandomizedDelaySec=5s
+Persistent=true
+Unit=tuneai-health.service
+
+[Install]
+WantedBy=timers.target
