@@ -23,6 +23,7 @@ readonly deployed_tag="$(tr -d '[:space:]' <"$state_file")"
 readonly expected_revision="${BASH_REMATCH[1]}"
 readonly readiness_url="${PUBLIC_HEALTH_URL%/health}/readiness"
 readonly ai_readiness_url="${readiness_url}/ai"
+readonly grafana_health_url="${PUBLIC_HEALTH_URL%/api/health}/monitoring/api/health"
 
 readiness_body="$(curl --fail --silent --show-error --max-time 10 "$readiness_url")" || fail "public readiness endpoint is unavailable"
 jq -e --arg revision "$expected_revision" \
@@ -45,10 +46,24 @@ for service in rabbitmq backend worker frontend; do
     [[ "$status" == "healthy" ]] || fail "$service container status is $status"
 done
 
+grafana_body="$(curl --fail --silent --show-error --max-time 10 "$grafana_health_url")" || fail "external Grafana endpoint is unavailable"
+jq -e '.database == "ok" and (.version | length > 0)' <<<"$grafana_body" >/dev/null || fail "Grafana is not ready"
+
+for service in prometheus grafana node-exporter cadvisor blackbox-exporter; do
+    mapfile -t containers < <(
+        docker ps -q \
+            --filter label=com.docker.compose.project=tuneai-monitoring \
+            --filter "label=com.docker.compose.service=$service"
+    )
+    [[ "${#containers[@]}" -eq 1 ]] || fail "monitoring $service must have exactly one running container"
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${containers[0]}")"
+    [[ "$status" == "healthy" || "$status" == "running" ]] || fail "monitoring $service container status is $status"
+done
+
 systemctl is-active --quiet tuneai-deploy.timer || fail "deployment watcher timer is inactive"
 
 disk_used="$(df -P / | awk 'NR == 2 {gsub(/%/, "", $5); print $5}')"
 [[ "$disk_used" =~ ^[0-9]+$ ]] || fail "cannot determine root filesystem usage"
 ((disk_used < 90)) || fail "root filesystem usage is ${disk_used}%"
 
-echo "TuneAI ${expected_revision} is ready; AI, containers, deployment watcher and disk are healthy (${disk_used}% used)."
+echo "TuneAI ${expected_revision} is ready; AI, Grafana, containers, deployment watcher and disk are healthy (${disk_used}% used)."
