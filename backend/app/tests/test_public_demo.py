@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import json
 
 from app.db.session import SessionLocal
-from app.models import OutboxEvent, Test as DbTest, User
+from app.models import Material, OutboxEvent, Question, Test as DbTest, User
 from app.services.demo_cleanup import cleanup_expired_demo_data
 from app.services.outbox import MATERIAL_UPLOADED
 from app.tests.conftest import auth_header
@@ -164,6 +164,9 @@ def test_demo_cleanup_removes_expired_demo_users_and_tests(client):
         assert removed == 2
         assert db.get(User, payload["user"]["id"]) is None
         assert db.get(DbTest, payload["test"]["id"]) is None
+        assert db.query(Question).filter(Question.test_id == payload["test"]["id"]).count() == 0
+        assert db.query(Material).filter(Material.test_id == payload["test"]["id"]).count() == 0
+        assert db.query(Material).filter(Material.owner_id == payload["user"]["id"]).count() == 0
 
 
 def test_demo_bootstrap_limit_can_block_new_demo_users(client, monkeypatch):
