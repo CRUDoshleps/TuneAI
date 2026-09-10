@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import json
 
 from app.db.session import SessionLocal
-from app.models import Material, OutboxEvent, Question, Test as DbTest, User
+from app.models import AuditLog, Material, OutboxEvent, Question, Test as DbTest, User
 from app.services.demo_cleanup import cleanup_expired_demo_data
 from app.services.outbox import MATERIAL_UPLOADED
 from app.tests.conftest import auth_header
@@ -157,13 +157,17 @@ def test_demo_cleanup_removes_expired_demo_users_and_tests(client):
         assert test is not None
         user.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
         test.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        audit_log = AuditLog(actor_id=user.id, action="demo.bootstrap", entity_type="user", entity_id=user.id, details={})
         db.add(user)
         db.add(test)
+        db.add(audit_log)
         db.commit()
+        audit_log_id = audit_log.id
         removed = cleanup_expired_demo_data(db)
         assert removed == 2
         assert db.get(User, payload["user"]["id"]) is None
         assert db.get(DbTest, payload["test"]["id"]) is None
+        assert db.get(AuditLog, audit_log_id).actor_id is None
         assert db.query(Question).filter(Question.test_id == payload["test"]["id"]).count() == 0
         assert db.query(Material).filter(Material.test_id == payload["test"]["id"]).count() == 0
         assert db.query(Material).filter(Material.owner_id == payload["user"]["id"]).count() == 0

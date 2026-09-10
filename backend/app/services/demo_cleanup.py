@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
     Answer,
     Assignment,
     Attempt,
+    AuditLog,
     GeneratedQuestionCache,
     Material,
     MaterialChunk,
@@ -86,6 +87,7 @@ def cleanup_expired_demo_data(db: Session, now: datetime | None = None) -> int:
         db.execute(delete(Question).where(Question.id.in_(question_ids)))
         db.execute(delete(Test).where(Test.id.in_(expired_test_ids)))
     if expired_user_ids:
+        db.execute(update(AuditLog).where(AuditLog.actor_id.in_(expired_user_ids)).values(actor_id=None))
         db.execute(
             delete(Assignment).where(
                 or_(Assignment.user_id.in_(expired_user_ids), Assignment.created_by_id.in_(expired_user_ids))
