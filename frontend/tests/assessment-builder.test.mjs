@@ -29,6 +29,13 @@ test("assessment editor keeps survey navigation beside persistent tab panels", (
   assert.doesNotMatch(builderSource, /scrollIntoView/);
 });
 
+test("methodist AI skills stay behind a native disclosure", () => {
+  const skillsPanelSource = appSource.slice(appSource.indexOf("function AISkillsPanel"), appSource.indexOf("function getSkillIds"));
+  assert.match(skillsPanelSource, /<details className="panel ai-skills-panel">/);
+  assert.match(skillsPanelSource, /<summary className="panel-title ai-skills-summary">/);
+  assert.doesNotMatch(skillsPanelSource, /<details className="panel ai-skills-panel" open/);
+});
+
 test("assessment builder supports question answer modes", () => {
   assert.match(appSource, /QUESTION_ANSWER_MODE_LABELS/);
   assert.match(appSource, /function questionAnswerModeFromForm/);

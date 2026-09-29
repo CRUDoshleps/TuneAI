@@ -3394,6 +3394,31 @@ summary:focus-visible {
   gap: 14px;
 }
 
+.ai-skills-summary {
+  justify-content: space-between;
+  margin-bottom: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ai-skills-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-skills-summary span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-skills-summary > svg {
+  transition: transform 160ms ease;
+}
+
+.ai-skills-panel[open] .ai-skills-summary > svg {
+  transform: rotate(180deg);
+}
+
 .skill-picker {
   grid-column: 1 / -1;
   border: 1px solid var(--line);

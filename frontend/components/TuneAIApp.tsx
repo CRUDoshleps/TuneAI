@@ -3464,8 +3464,11 @@ function AISkillsPanel({
   onDelete: (skill: AISkill) => Promise<void>;
 }) {
   return (
-    <section className="panel ai-skills-panel">
-      <div className="panel-title"><FileText size={18} /> AI-скиллы методиста</div>
+    <details className="panel ai-skills-panel">
+      <summary className="panel-title ai-skills-summary">
+        <span><FileText size={18} /> AI-скиллы методиста</span>
+        <ChevronDown size={18} />
+      </summary>
       <form onSubmit={onCreate} className="stack compact">
         <input name="name" placeholder="Название скилла" required minLength={2} />
         <input name="description" placeholder="Кратко: что меняет этот скилл" />
@@ -3575,7 +3578,7 @@ function AISkillsPanel({
         ))}
         {!skills.length && <p className="muted">Пока нет AI-скиллов. Можно создать текстом или загрузить Markdown/TXT файл.</p>}
       </div>
-    </section>
+    </details>
   );
 }
 
