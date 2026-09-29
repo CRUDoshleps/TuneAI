@@ -197,6 +197,15 @@ const LANDING_AUDIENCES = [
 
 const DEFAULT_RUBRIC = "Оценить корректность, полноту, аргументацию и опору на материалы.";
 const DEFAULT_AGENT = "rubric-rag-reviewer";
+type BuilderStep = "main" | "source" | "questions" | "evaluation" | "publish";
+
+const BUILDER_STEPS: Array<{ id: BuilderStep; label: string }> = [
+  { id: "main", label: "Основное" },
+  { id: "source", label: "Источник" },
+  { id: "questions", label: "Вопросы" },
+  { id: "evaluation", label: "Оценивание" },
+  { id: "publish", label: "Публикация" }
+];
 
 function newIdempotencyKey(prefix: string) {
   const randomId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -871,8 +880,10 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
       setActiveSection("builder");
       setStatus("Черновик создан — добавьте вопросы и опубликуйте после проверки");
       formElement.reset();
+      return true;
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось создать тест."));
+      return false;
     }
   }
 
@@ -883,25 +894,28 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
     }
     setError("");
     const form = new FormData(event.currentTarget);
+    const settingsSection = String(form.get("settings_section") || "main");
     const timeLimitRaw = String(form.get("time_limit_seconds") || "").trim();
+    const payload = settingsSection === "publish"
+      ? { status: String(form.get("status")) }
+      : {
+          title: String(form.get("title")),
+          description: String(form.get("description") || ""),
+          criteria: buildCriteriaFromForm(form),
+          time_limit_seconds: timeLimitRaw ? Number(timeLimitRaw) : null
+        };
     try {
       const updated = await apiFetch<Test>(
         `/tests/${selectedTest.id}`,
         {
           method: "PATCH",
-          body: JSON.stringify({
-            title: String(form.get("title")),
-            description: String(form.get("description") || ""),
-            status: String(form.get("status")),
-            criteria: buildCriteriaFromForm(form),
-            time_limit_seconds: timeLimitRaw ? Number(timeLimitRaw) : null
-          })
+          body: JSON.stringify(payload)
         },
         token
       );
       await loadTests();
       setSelectedTest(updated);
-      setStatus("Настройки теста сохранены");
+      setStatus(settingsSection === "publish" ? "Статус публикации сохранён" : "Настройки теста сохранены");
     } catch (err) {
       setError(getUserErrorMessage(err, "Не удалось сохранить настройки теста."));
     }
@@ -2721,7 +2735,7 @@ function BuilderPanel({
   skills: AISkill[];
   selectedTest: Test | null;
   onSelect: (test: Test) => void;
-  onCreateTest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onCreateTest: (event: FormEvent<HTMLFormElement>) => Promise<boolean>;
   onUpdateTest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onAddQuestion: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onUpdateQuestion: (question: Question, event: FormEvent<HTMLFormElement>) => Promise<void>;
@@ -2745,88 +2759,139 @@ function BuilderPanel({
 }) {
   const manageableSelected = selectedTest && tests.some((test) => test.id === selectedTest.id);
   const selectedSkillIds = selectedTest ? getSkillIds(selectedTest) : [];
+  const [activeStep, setActiveStep] = useState<BuilderStep>("main");
+  const [creatingTest, setCreatingTest] = useState(false);
+
+  const selectTest = (test: Test) => {
+    setCreatingTest(false);
+    onSelect(test);
+  };
+
+  const createTest = async (event: FormEvent<HTMLFormElement>) => {
+    if (await onCreateTest(event)) {
+      setCreatingTest(false);
+      setActiveStep("main");
+    }
+  };
 
   return (
     <section className="builder-layout">
-      <div className="builder-wizard" aria-label="Конструктор проверок">
-        {[["Основное", "builder-main"], ["Источник", "builder-source"], ["Вопросы", "builder-questions"], ["Оценивание", "builder-rules"], ["Публикация", "builder-publish"]].map(([step, target], index) => (
-          <button type="button" key={step} onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-            <b>{index + 1}</b>{step}
-          </button>
-        ))}
+      <div className="builder-sidebar">
+        <TestPicker
+          title="Мои опросы"
+          tests={tests}
+          selectedTest={selectedTest}
+          emptyText="Создайте первый опрос."
+          onSelect={selectTest}
+        />
+        <button className="secondary builder-create-button" type="button" onClick={() => setCreatingTest(true)}>
+          <Plus size={17} /> Новый опрос
+        </button>
       </div>
-      <TestPicker
-        title="Мои сценарии"
-        tests={tests}
-        selectedTest={selectedTest}
-        emptyText="Создайте первый тест."
-        onSelect={onSelect}
-      />
 
-      <section className="panel" id="builder-main">
-        <div className="panel-title"><Plus size={18} /> Новый сценарий</div>
-        <form onSubmit={onCreateTest} className="stack compact">
-          <input name="title" placeholder="Название" required minLength={3} />
-          <textarea name="description" placeholder="Краткое описание" rows={3} />
-          <select name="scenario" defaultValue={user.role === "student" ? "self_training" : "exam"}>
-            <option value="self_training">Самоподготовка</option>
-            <option value="exam">Устный экзамен</option>
-            <option value="interview">Интервью</option>
-          </select>
-          <select name="test_type" defaultValue={user.role === "student" ? "self_training" : "exam"}>
-            {user.role === "student" ? (
-              <option value="self_training">Тренировка</option>
-            ) : (
-              <>
-                <option value="exam">Экзамен</option>
-                <option value="self_training">Тренировка</option>
+      <div className="builder-editor">
+        {creatingTest || !manageableSelected ? (
+          <section className="panel builder-create-panel">
+            <div className="builder-editor-heading">
+              <div>
+                <span className="context-label">Новый опрос</span>
+                <h2>Создайте черновик</h2>
+                <p>После создания источники, вопросы и оценивание настраиваются в отдельных вкладках.</p>
+              </div>
+              {tests.length > 0 && <button className="ghost" type="button" onClick={() => setCreatingTest(false)}>Отмена</button>}
+            </div>
+            <form onSubmit={createTest} className="stack compact">
+              <input name="title" placeholder="Название" required minLength={3} />
+              <textarea name="description" placeholder="Краткое описание" rows={3} />
+              <select name="scenario" defaultValue={user.role === "student" ? "self_training" : "exam"}>
+                <option value="self_training">Самоподготовка</option>
+                <option value="exam">Устный экзамен</option>
                 <option value="interview">Интервью</option>
-              </>
-            )}
-          </select>
-          <input name="competencies" placeholder="Компетенции через запятую: outbox, RAG, архитектура" />
-          <div className="settings-form mini">
-            <input name="organization_id" placeholder="ID организации" />
-            <input name="course_id" placeholder="ID курса" />
-          </div>
-          <textarea name="rubric" placeholder="Критерии проверки" rows={3} defaultValue={DEFAULT_RUBRIC} />
-          <div className="settings-form mini">
-            <select name="agent_profile" defaultValue={DEFAULT_AGENT}>
-              <option value="rubric-rag-reviewer">Rubric + RAG reviewer</option>
-              <option value="exam-strict-reviewer">Строгий экзаменатор</option>
-              <option value="interview-coach">Интервью-коуч</option>
-              <option value="self-training-mentor">Ментор самоподготовки</option>
-            </select>
-            <select name="strictness" defaultValue="balanced">
-              <option value="soft">Мягкая проверка</option>
-              <option value="balanced">Сбалансированная</option>
-              <option value="strict">Строгая</option>
-            </select>
-          </div>
-          <SkillCheckboxGroup skills={skills} selectedIds={[]} />
-          <select name="answer_mode" defaultValue="both">
-            <option value="both">Ответ: голос или текст</option>
-            <option value="audio">Ответ: только голос</option>
-            <option value="text">Ответ: только текст</option>
-          </select>
-          <textarea name="question" placeholder="Первый вопрос" rows={3} required />
-          <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии проверки" rows={4} />
-          <button className="primary" type="submit"><Plus size={17} /> Создать</button>
-        </form>
-      </section>
-
-      <section className="panel builder-detail" id="builder-rules">
-        {manageableSelected ? (
+              </select>
+              <select name="test_type" defaultValue={user.role === "student" ? "self_training" : "exam"}>
+                {user.role === "student" ? (
+                  <option value="self_training">Тренировка</option>
+                ) : (
+                  <>
+                    <option value="exam">Экзамен</option>
+                    <option value="self_training">Тренировка</option>
+                    <option value="interview">Интервью</option>
+                  </>
+                )}
+              </select>
+              <input name="competencies" placeholder="Компетенции через запятую: outbox, RAG, архитектура" />
+              <div className="settings-form mini">
+                <input name="organization_id" placeholder="ID организации" />
+                <input name="course_id" placeholder="ID курса" />
+              </div>
+              <textarea name="rubric" placeholder="Критерии проверки" rows={3} defaultValue={DEFAULT_RUBRIC} />
+              <div className="settings-form mini">
+                <select name="agent_profile" defaultValue={DEFAULT_AGENT}>
+                  <option value="rubric-rag-reviewer">Rubric + RAG reviewer</option>
+                  <option value="exam-strict-reviewer">Строгий экзаменатор</option>
+                  <option value="interview-coach">Интервью-коуч</option>
+                  <option value="self-training-mentor">Ментор самоподготовки</option>
+                </select>
+                <select name="strictness" defaultValue="balanced">
+                  <option value="soft">Мягкая проверка</option>
+                  <option value="balanced">Сбалансированная</option>
+                  <option value="strict">Строгая</option>
+                </select>
+              </div>
+              <SkillCheckboxGroup skills={skills} selectedIds={[]} />
+              <select name="answer_mode" defaultValue="both">
+                <option value="both">Ответ: голос или текст</option>
+                <option value="audio">Ответ: только голос</option>
+                <option value="text">Ответ: только текст</option>
+              </select>
+              <textarea name="question" placeholder="Первый вопрос" rows={3} required />
+              <textarea name="expected_answer" placeholder="Ожидаемый ответ или критерии проверки" rows={4} />
+              <button className="primary" type="submit"><Plus size={17} /> Создать черновик</button>
+            </form>
+          </section>
+        ) : (
           <>
-            <div className="panel-title"><ClipboardList size={18} /> Параметры теста</div>
-            <form key={selectedTest.id} onSubmit={onUpdateTest} className="settings-form">
+            <header className="builder-editor-heading">
+              <div>
+                <span className="context-label">Редактирование опроса</span>
+                <div className="builder-editor-title">
+                  <h2>{selectedTest.title}</h2>
+                  <span className={`status-pill ${selectedTest.status}`}>{TEST_STATUS_LABELS[selectedTest.status]}</span>
+                </div>
+                <p>{selectedTest.description || "Настройте содержимое, оценивание и публикацию выбранного опроса."}</p>
+              </div>
+            </header>
+
+            <div className="builder-wizard" role="tablist" aria-label="Разделы опроса">
+              {BUILDER_STEPS.map((step, index) => (
+                <button
+                  type="button"
+                  role="tab"
+                  id={`builder-tab-${step.id}`}
+                  aria-controls={`builder-step-${step.id}`}
+                  aria-selected={activeStep === step.id}
+                  tabIndex={activeStep === step.id ? 0 : -1}
+                  className={activeStep === step.id ? "active" : ""}
+                  key={step.id}
+                  onClick={() => setActiveStep(step.id)}
+                >
+                  <b>{index + 1}</b>{step.label}
+                </button>
+              ))}
+            </div>
+
+            <section
+              className="panel builder-detail builder-step"
+              id="builder-step-main"
+              role="tabpanel"
+              aria-labelledby="builder-tab-main"
+              hidden={activeStep !== "main"}
+            >
+              <div className="panel-title"><ClipboardList size={18} /> Основные настройки</div>
+              <form key={`${selectedTest.id}-main`} onSubmit={onUpdateTest} className="settings-form">
+              <input type="hidden" name="settings_section" value="main" />
               <input name="title" defaultValue={selectedTest.title} placeholder="Название" required minLength={3} />
               <textarea name="description" defaultValue={selectedTest.description} placeholder="Описание" rows={3} />
-              <select name="status" defaultValue={selectedTest.status}>
-                <option value="draft">Черновик</option>
-                <option value="published">Опубликован</option>
-                <option value="archived">В архиве</option>
-              </select>
               <input
                 name="competencies"
                 defaultValue={
@@ -2895,15 +2960,31 @@ function BuilderPanel({
               />
               <button className="secondary" type="submit">Сохранить настройки</button>
             </form>
+            </section>
 
-            <SourceImportPanel
-              sourceImports={sourceImports}
-              onUpload={onUploadPresentation}
-              onGenerate={onGenerateFromPresentation}
-              onAccept={onAcceptPresentationCandidate}
-            />
+            <section
+              className="panel builder-detail builder-step"
+              id="builder-step-source"
+              role="tabpanel"
+              aria-labelledby="builder-tab-source"
+              hidden={activeStep !== "source"}
+            >
+              <SourceImportPanel
+                sourceImports={sourceImports}
+                onUpload={onUploadPresentation}
+                onGenerate={onGenerateFromPresentation}
+                onAccept={onAcceptPresentationCandidate}
+              />
+            </section>
 
-            <div className="questions-manage" id="builder-questions">
+            <section
+              className="panel builder-detail builder-step"
+              id="builder-step-questions"
+              role="tabpanel"
+              aria-labelledby="builder-tab-questions"
+              hidden={activeStep !== "questions"}
+            >
+            <div className="questions-manage">
               <div className="panel-title"><FileText size={18} /> Вопросы</div>
               <form onSubmit={onGenerateQuestions} className="generation-form">
                 <select name="material_policy" defaultValue={getCriteriaString(selectedTest, "material_policy", "test_and_question")}>
@@ -2976,8 +3057,16 @@ function BuilderPanel({
 	                <button className="primary" type="submit"><Plus size={17} /> Добавить вопрос</button>
 	              </form>
             </div>
+            </section>
 
-            <section className="calibration-panel" id="builder-publish">
+            <section
+              className="builder-step builder-evaluation-step"
+              id="builder-step-evaluation"
+              role="tabpanel"
+              aria-labelledby="builder-tab-evaluation"
+              hidden={activeStep !== "evaluation"}
+            >
+            <section className="panel calibration-panel">
               <div className="panel-title"><Activity size={18} /> Calibration Preview</div>
               <form onSubmit={onPreviewCalibration} className="calibration-form">
                 <select name="skill_id" defaultValue={selectedSkillIds[0] || ""}>
@@ -3009,6 +3098,23 @@ function BuilderPanel({
                   ))}
                 </div>
               )}
+            </section>
+            <AISkillsPanel
+              skills={skills}
+              onCreate={onCreateSkill}
+              onUpload={onUploadSkill}
+              onUpdate={onUpdateSkill}
+              onDelete={onDeleteSkill}
+            />
+            </section>
+
+            <section
+              className="panel builder-detail builder-step"
+              id="builder-step-publish"
+              role="tabpanel"
+              aria-labelledby="builder-tab-publish"
+              hidden={activeStep !== "publish"}
+            >
               <div className="publish-checklist">
                 <div><strong>Готовность к публикации</strong><span className={`status-pill ${selectedTest.status}`}>{TEST_STATUS_LABELS[selectedTest.status]}</span></div>
                 <ul>
@@ -3017,22 +3123,24 @@ function BuilderPanel({
                   <li className={selectedTest.questions.every((question) => question.question_type === "open_response" ? Boolean(question.expected_answer.trim()) : question.correct_option_ids.length > 0) ? "done" : ""}><CheckCircle2 size={16} /> У вопросов настроены ответы</li>
                   <li className={calibrationPreview ? "done" : ""}><CheckCircle2 size={16} /> Оценивание проверено на примерах</li>
                 </ul>
-                <p>Чтобы открыть assessment участникам, выберите статус «Опубликован» в параметрах и сохраните настройки.</p>
+                <p>Опубликуйте опрос, когда все обязательные пункты готовы.</p>
               </div>
+              <form key={`${selectedTest.id}-publish`} onSubmit={onUpdateTest} className="publish-form">
+                <input type="hidden" name="settings_section" value="publish" />
+                <label>
+                  Статус опроса
+                  <select name="status" defaultValue={selectedTest.status}>
+                    <option value="draft">Черновик</option>
+                    <option value="published">Опубликован</option>
+                    <option value="archived">В архиве</option>
+                  </select>
+                </label>
+                <button className="primary" type="submit">Сохранить статус</button>
+              </form>
             </section>
           </>
-        ) : (
-          <EmptyState title="Выберите сценарий" text="После выбора можно менять статус, лимит времени и вопросы." />
         )}
-      </section>
-
-      <AISkillsPanel
-        skills={skills}
-        onCreate={onCreateSkill}
-        onUpload={onUploadSkill}
-        onUpdate={onUpdateSkill}
-        onDelete={onDeleteSkill}
-      />
+      </div>
     </section>
   );
 }

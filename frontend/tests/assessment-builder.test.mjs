@@ -18,6 +18,17 @@ test("assessment builder exposes rag generation and calibration actions", () => 
   assert.match(appSource, /className="calibration-form"/);
 });
 
+test("assessment editor keeps survey navigation beside persistent tab panels", () => {
+  const builderSource = appSource.slice(appSource.indexOf("function BuilderPanel"), appSource.indexOf("function SourceImportPanel"));
+  assert.match(builderSource, /className="builder-sidebar"/);
+  assert.match(builderSource, /className="builder-editor"/);
+  assert.match(builderSource, /role="tablist"/);
+  assert.match(builderSource, /aria-selected=\{activeStep === step\.id\}/);
+  assert.match(builderSource, /hidden=\{activeStep !== "main"\}/);
+  assert.match(builderSource, /hidden=\{activeStep !== "questions"\}/);
+  assert.doesNotMatch(builderSource, /scrollIntoView/);
+});
+
 test("assessment builder supports question answer modes", () => {
   assert.match(appSource, /QUESTION_ANSWER_MODE_LABELS/);
   assert.match(appSource, /function questionAnswerModeFromForm/);
