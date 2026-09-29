@@ -25,6 +25,8 @@ test("mobile shell keeps logout and every admin section reachable", () => {
 
 test("responsive builder and admin grids cannot widen the page", () => {
   assert.match(stylesSource, /\.skill-upload-form \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(stylesSource, /\.generation-form \{\s*grid-template-columns: minmax\(160px, 1fr\) repeat\(3, minmax\(72px, 0\.55fr\)\)/);
+  assert.match(stylesSource, /\.question-actions \{\s*grid-column: 2;/);
   assert.match(stylesSource, /\.builder-layout,[\s\S]*?\.admin-sections,[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(stylesSource, /\.admin-panel,[\s\S]*?\.admin-panel > \*,[\s\S]*?min-width: 0;/);
 });

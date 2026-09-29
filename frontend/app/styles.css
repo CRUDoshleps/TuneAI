@@ -2765,8 +2765,61 @@ textarea {
   align-items: start;
 }
 
+.builder-sidebar,
+.builder-editor,
+.builder-evaluation-step {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.builder-editor {
+  container-type: inline-size;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.builder-sidebar {
+  position: sticky;
+  top: 16px;
+}
+
+.builder-create-button {
+  width: 100%;
+}
+
+.builder-editor-heading {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.builder-editor-heading h2,
+.builder-editor-heading p {
+  margin: 0;
+}
+
+.builder-editor-heading p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.builder-editor-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.builder-editor-title h2 {
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+
 .builder-wizard {
-  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(5, minmax(110px, 1fr));
   gap: 8px;
@@ -2793,6 +2846,13 @@ textarea {
 .builder-wizard button:hover {
   border-color: #c5aa22;
   background: var(--yellow-soft);
+}
+
+.builder-wizard button.active {
+  border-color: var(--ink);
+  background: var(--yellow-soft);
+  color: var(--ink);
+  box-shadow: 0 2px 0 var(--ink);
 }
 
 .builder-wizard b {
@@ -3049,7 +3109,7 @@ textarea {
 
 .question-editor > header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -3069,10 +3129,11 @@ textarea {
 }
 
 .question-actions {
+  grid-column: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .icon-button {
@@ -3281,19 +3342,81 @@ summary:focus-visible {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
-.builder-layout > .panel:first-child {
-  grid-row: 2 / span 2;
-}
-
 .builder-detail {
-  grid-column: 2;
   min-height: 560px;
 }
 
+.builder-step[hidden] {
+  display: none;
+}
+
+.publish-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.publish-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+@container (max-width: 720px) {
+  .builder-wizard button {
+    gap: 5px;
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+
+  .builder-wizard b {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+  }
+
+  .calibration-form,
+  .publish-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .publish-checklist ul {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ai-skills-panel {
-  grid-column: 2;
   display: grid;
   gap: 14px;
+}
+
+.ai-skills-summary {
+  justify-content: space-between;
+  margin-bottom: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ai-skills-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-skills-summary span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-skills-summary > svg {
+  transition: transform 160ms ease;
+}
+
+.ai-skills-panel[open] .ai-skills-summary > svg {
+  transform: rotate(180deg);
 }
 
 .skill-picker {
@@ -4136,9 +4259,18 @@ summary:focus-visible {
 }
 
 .generation-form {
-  grid-template-columns: minmax(160px, 1fr) 90px 120px 140px auto auto;
+  grid-template-columns: minmax(160px, 1fr) repeat(3, minmax(72px, 0.55fr));
   align-items: center;
   margin-bottom: 12px;
+}
+
+.generation-form .inline-check {
+  grid-column: 1 / 3;
+}
+
+.generation-form > button {
+  grid-column: 3 / -1;
+  width: 100%;
 }
 
 .generated-question-list,
@@ -4377,8 +4509,6 @@ td {
   .grid,
   .app-shell,
   .flow-grid,
-  .builder-layout,
-  .builder-wizard,
   .settings-form,
   .question-form,
   .generation-form,
@@ -4407,6 +4537,12 @@ td {
   }
 
   .slide-picker { grid-template-columns: 1fr; }
+  .question-actions,
+  .generation-form .inline-check,
+  .generation-form > button {
+    grid-column: auto;
+  }
+
   .question-actions { justify-content: flex-start; }
 
   .landing-card {
@@ -4736,6 +4872,8 @@ td {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .builder-sidebar { position: static; }
+  .publish-form { grid-template-columns: 1fr; }
   .builder-wizard button { min-width: 150px; }
   .source-import-panel { padding: 12px; }
   .recording-preview { grid-template-columns: 1fr; }
