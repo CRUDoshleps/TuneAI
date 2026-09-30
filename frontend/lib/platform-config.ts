@@ -1,6 +1,6 @@
 export type DemoFlow = "builder" | "materials" | "take";
 export type PlatformRole = "student" | "examinee" | "candidate" | "methodist" | "teacher" | "interviewer" | "admin";
-export type PublicView = "home" | "demo" | "auth";
+export type PublicView = "home" | "demo" | "yace" | "auth";
 export type PlatformTemplate = "unconfigured" | "official";
 
 export type PlatformTheme = {

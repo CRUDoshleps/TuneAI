@@ -148,6 +148,7 @@ trap rollback ERR
 IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" pull
 IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" run --rm migrate
 IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" run --rm bootstrap-admin
+IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" run --rm --no-deps backend python -m app.scripts.seed_memes
 IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" up -d --remove-orphans
 wait_containers_healthy "$new_tag"
 IMAGE_TAG="$new_tag" docker compose --project-name tuneai --file "$compose_file" run --rm --no-deps backend python -m app.scripts.check_ai

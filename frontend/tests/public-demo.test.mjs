@@ -66,7 +66,7 @@ test("public view navigation starts each screen at the top", () => {
 });
 
 test("login and demo are separate public flows", () => {
-  assert.match(configSource, /export type PublicView = "home" \| "demo" \| "auth"/);
+  assert.match(configSource, /export type PublicView = "home" \| "demo" \| "yace" \| "auth"/);
   assert.match(appSource, /const openLoginView = \(\) => \{[\s\S]*?openPublicView\("auth"\)/);
   assert.match(appSource, /className="nav-pill"[^>]+onClick=\{openLoginView\}/);
   assert.match(appSource, /У меня есть аккаунт<\/button>/);
