@@ -12,9 +12,18 @@ type Catalog = { title: string; questions: ConferenceQuestion[] };
 type Session = { tokens: { access_token: string; refresh_token: string }; attempt: Attempt };
 type Reference = { name: string; explanation: string; expected_answer: string; source: string };
 
-export type ConferenceQuizKind = "memes" | "education";
+export type ConferenceQuizKind = "memes" | "education" | "neuromemes";
 
 const QUIZ_INTROS = {
+  neuromemes: {
+    title: "Нейромемы",
+    heading: <>Что за мем?<br />Посмотри<br /><span>и назови!</span></>,
+    description: <>Три картинки — три мема.<br /> Просто скажи название вслух!</>,
+    duration: "1–2 минуты",
+    referenceHeading: "Правильный ответ",
+    sourceLabel: "",
+    placeholder: "Как называется мем?"
+  },
   memes: {
     title: "Зачёт по мемам",
     heading: <>Узнаёте мем?<br />Расскажите<br /><span>его историю.</span></>,
@@ -48,6 +57,8 @@ export default function ConferenceQuiz({ quiz }: { quiz: ConferenceQuizKind }) {
   const [finished, setFinished] = useState(false);
   const keys = useRef<Record<string, string>>({});
   const question = catalog?.questions[index];
+  const questionCount = catalog?.questions.length;
+  const isLastQuestion = index === (questionCount ?? 0) - 1;
   const answer = session?.attempt.answers.find(item => item.question_id === question?.id);
   const pending = Boolean(answer && answer.status !== "completed" && answer.status !== "failed");
 
@@ -140,7 +151,7 @@ export default function ConferenceQuiz({ quiz }: { quiz: ConferenceQuizKind }) {
   function next() {
     setReference(null);
     setError("");
-    if (index === 4) setFinished(true);
+    if (isLastQuestion) setFinished(true);
     else setIndex(index + 1);
     document.getElementById("conference-quiz")?.scrollIntoView({ block: "start" });
   }
@@ -153,11 +164,11 @@ export default function ConferenceQuiz({ quiz }: { quiz: ConferenceQuizKind }) {
           <h1>{intro.heading}</h1>
           <p>{intro.description}</p>
           <div className={styles.actions}><button className={styles.primary} onClick={begin} disabled={busy || !catalog || Boolean(session && !finished)}><Mic size={18} />{busy && !session ? "Готовим вопросы…" : "Начать зачёт"}<ArrowRight size={18} /></button><span><Clock size={15} />{intro.duration}</span></div>
-          <div className={styles.meta}><span>5 вопросов</span><span>Без регистрации</span></div>
+          <div className={styles.meta}><span>{questionCount ? `${questionCount} ${questionCount === 3 ? "вопроса" : "вопросов"}` : "Загружаем вопросы…"}</span><span>Без регистрации</span></div>
         </div>
         <div className={styles.stage} id="conference-quiz" aria-label={intro.title}>
           <section className={styles.card}>
-            <header className={styles.cardHeader}><strong>TuneAI <span>×</span> YaC/e</strong><span>{finished ? "Итог" : `ВОПРОС ${String(index + 1).padStart(2, "0")} / 05`}</span></header>
+            <header className={styles.cardHeader}><strong>TuneAI <span>×</span> YaC/e</strong><span>{finished ? "Итог" : questionCount ? `ВОПРОС ${String(index + 1).padStart(2, "0")} / ${String(questionCount).padStart(2, "0")}` : "Загрузка"}</span></header>
             {error && <p className={styles.error} role="alert">{error}</p>}
             {!catalog ? <p className={styles.loading}>{error ? "Обновите страницу, чтобы попробовать снова." : "Загружаем вопросы…"}</p> : finished && session ? (
               <div className={styles.feedback}>
@@ -175,8 +186,8 @@ export default function ConferenceQuiz({ quiz }: { quiz: ConferenceQuizKind }) {
                 {answer.transcript && <details className={styles.transcript}><summary>Ваш ответ</summary><p>{answer.transcript}</p></details>}
                 <p>{answer.evaluation?.feedback}</p>
                 {Boolean(answer.evaluation?.missing_points.length) && <p><strong>Чего не хватило:</strong> {answer.evaluation?.missing_points.join(" ")}</p>}
-                {reference && <><div className={styles.lore}><h3>{intro.referenceHeading}</h3><p>{reference.explanation}</p><a href={reference.source} target="_blank" rel="noreferrer">{intro.sourceLabel}</a></div><details className={styles.example}><summary>Пример ответа</summary><p>{reference.expected_answer}</p></details></>}
-                <button className={styles.primary} onClick={next}>{index === 4 ? "Посмотреть итог" : "Следующий вопрос"}<ArrowRight size={18} /></button>
+                {reference && <><div className={styles.lore}><h3>{intro.referenceHeading}</h3><p>{reference.explanation}</p>{intro.sourceLabel && <a href={reference.source} target="_blank" rel="noreferrer">{intro.sourceLabel}</a>}</div><details className={styles.example}><summary>Пример ответа</summary><p>{reference.expected_answer}</p></details></>}
+                <button className={styles.primary} onClick={next}>{isLastQuestion ? "Посмотреть итог" : "Следующий вопрос"}<ArrowRight size={18} /></button>
               </div>
             ) : question && (
               <>
@@ -191,12 +202,12 @@ export default function ConferenceQuiz({ quiz }: { quiz: ConferenceQuizKind }) {
                 </div>
               </>
             )}
-            <footer className={styles.cardFooter}><div>{[0, 1, 2, 3, 4].map(n => <span key={n} aria-current={n === index && !finished ? "step" : undefined}>{n + 1}</span>)}</div><span>{session?.attempt.answers.filter(a => a.status === "completed").length || 0} из 5 проверено</span></footer>
+            <footer className={styles.cardFooter}><div>{catalog?.questions.map((item, n) => <span key={item.id} aria-current={n === index && !finished ? "step" : undefined}>{n + 1}</span>)}</div><span>{session?.attempt.answers.filter(a => a.status === "completed").length || 0} из {questionCount ?? "…"} проверено</span></footer>
           </section>
           <span className={styles.star} aria-hidden="true">✳</span>
         </div>
       </section>
-      <footer className={styles.footer}>{quiz === "memes" ? <span>Иллюстрации по мотивам мемов: <a href="https://memepedia.ru/cheremsha/" target="_blank" rel="noreferrer">Memepedia</a>, <a href="https://media.halvacard.ru/entertainment/populiarnye-memy-2026" target="_blank" rel="noreferrer">Халва Медиа</a></span> : <span>Материал: <a href="/yace-education.pdf" target="_blank" rel="noreferrer">Образование, ИИ и ответственность</a></span>}</footer>
+      <footer className={styles.footer}>{quiz === "neuromemes" ? <span>Иллюстрации по мотивам нейромемов</span> : quiz === "memes" ? <span>Иллюстрации по мотивам мемов: <a href="https://memepedia.ru/cheremsha/" target="_blank" rel="noreferrer">Memepedia</a>, <a href="https://media.halvacard.ru/entertainment/populiarnye-memy-2026" target="_blank" rel="noreferrer">Халва Медиа</a></span> : <span>Материал: <a href="/yace-education.pdf" target="_blank" rel="noreferrer">Образование, ИИ и ответственность</a></span>}</footer>
     </section>
   );
 }

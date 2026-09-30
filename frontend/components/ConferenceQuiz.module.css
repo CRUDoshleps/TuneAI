@@ -13,3 +13,5 @@
 @media(max-width:760px){.page{width:calc(100% - 40px)}.hero{grid-template-columns:1fr;gap:32px;padding:37px 0 43px}.copy{padding:0}.copy h1{font-size:54px}.copy>p{font-size:16px;margin:20px 0 24px}.copy>p br{display:none}.actions>.primary{font-size:14px}.stage{max-width:560px;width:100%;margin:auto}.visual{height:235px}.question{padding:21px}.question h2{font-size:24px}.footer{flex-wrap:wrap;padding:20px 0;gap:12px}}
 @media(max-width:430px){.page{width:calc(100% - 40px)}.copy h1{font-size:45px}.copy>p{font-size:14px}.actions>.primary{font-size:12px;gap:9px}.actions{gap:16px}.meta{font-size:10px}.visual{height:192px}.question{padding:18px}.question h2{font-size:21px}.cardHeader{padding:14px 17px}.cardFooter{padding:12px 17px}.cardFooter>span{font-size:9px}.star{right:-7px;font-size:46px}.stage:before{left:8px;right:-7px}.feedback{padding:22px 20px}.feedback h2{font-size:25px}}
 .visual:has(img[src$="minutes.jpg"]){height:auto;aspect-ratio:16/9}
+.visual img[src*="neuro-"]{object-fit:contain;background:#fffdf4}
+@media(max-width:430px){.selector button{padding:12px 10px;font-size:12px}}

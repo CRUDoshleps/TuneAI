@@ -34,7 +34,7 @@ def _quiz(db: Session, quiz_key: str) -> Test:
 
 
 @router.get("/{quiz_key}")
-def conference_quiz(quiz_key: Literal["memes", "education"], db: Session = Depends(get_db)) -> dict:
+def conference_quiz(quiz_key: Literal["memes", "education", "neuromemes"], db: Session = Depends(get_db)) -> dict:
     test = _quiz(db, quiz_key)
     questions = []
     for question in sorted(test.questions, key=lambda q: q.order_index):
@@ -51,7 +51,7 @@ def conference_quiz(quiz_key: Literal["memes", "education"], db: Session = Depen
 
 
 @router.post("/{quiz_key}/start", response_model=ConferenceSessionRead, status_code=201)
-def start_conference_quiz(quiz_key: Literal["memes", "education"], db: Session = Depends(get_db)) -> ConferenceSessionRead:
+def start_conference_quiz(quiz_key: Literal["memes", "education", "neuromemes"], db: Session = Depends(get_db)) -> ConferenceSessionRead:
     test = _quiz(db, quiz_key)
     settings = get_settings()
     cleanup_expired_demo_data(db)
@@ -78,7 +78,7 @@ def start_conference_quiz(quiz_key: Literal["memes", "education"], db: Session =
 
 @router.get("/{quiz_key}/attempts/{attempt_id}/questions/{question_id}/explanation")
 def conference_explanation(
-    quiz_key: Literal["memes", "education"],
+    quiz_key: Literal["memes", "education", "neuromemes"],
     attempt_id: str,
     question_id: str,
     db: Session = Depends(get_db),

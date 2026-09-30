@@ -14,7 +14,7 @@ from app.services.rag import index_material, retrieve_context
 from app.tests.conftest import auth_header
 
 
-@pytest.fixture(params=["memes", "education"])
+@pytest.fixture(params=["memes", "education", "neuromemes"])
 def quiz_key(request):
     return request.param
 
@@ -24,26 +24,32 @@ def quiz_id(quiz_key):
     return QUIZZES[quiz_key]["id"]
 
 
-def test_conference_seed_preserves_five_prepared_questions_on_repeat(client, quiz_key, quiz_id):
+@pytest.fixture
+def question_count(quiz_key):
+    return 3 if quiz_key == "neuromemes" else 5
+
+
+def test_conference_seed_preserves_prepared_questions_on_repeat(client, quiz_key, quiz_id, question_count):
     with SessionLocal() as db:
         test = seed_conference_quiz(db, quiz_key)
         ids = [question.id for question in test.questions]
         seed_conference_quiz(db, quiz_key)
         assert [question.id for question in test.questions] == ids
-        assert db.query(Question).filter(Question.test_id == quiz_id).count() == 5
+        assert db.query(Question).filter(Question.test_id == quiz_id).count() == question_count
         answers = [q.expected_answer for q in sorted(test.questions, key=lambda q: q.order_index)]
         fragments = {
             "memes": ["черемша", "Минут 10–15", "пухососы", "Вернера Херцога", "стриме Коляки"],
             "education": ["рынок труда", "Запоминание", "фундаментальность", "советский период", "Минпросвещения"],
+            "neuromemes": ["Сикс севен", "Тун Тун Сахур", "Бомбардиро Крокодило"],
         }
         for expected, fragment in zip(answers, fragments[quiz_key]):
             assert fragment in expected
-        assert db.query(Material).filter(Material.test_id == quiz_id).count() == 5
-        assert db.query(OutboxEvent).filter(OutboxEvent.event_type == MATERIAL_UPLOADED).count() == 5
+        assert db.query(Material).filter(Material.test_id == quiz_id).count() == question_count
+        assert db.query(OutboxEvent).filter(OutboxEvent.event_type == MATERIAL_UPLOADED).count() == question_count
         assert test.expires_at is None and not test.is_demo
     catalog = client.get(f"/public/{quiz_key}")
     assert catalog.status_code == 200
-    assert len(catalog.json()["questions"]) == 5
+    assert len(catalog.json()["questions"]) == question_count
     assert "expected_answer" not in catalog.text
     assert "explanation" not in catalog.text
 
@@ -88,7 +94,7 @@ async def test_meme_replacement_updates_existing_reference_and_removes_old_rag_c
 
 
 @pytest.mark.asyncio
-async def test_conference_voice_and_text_answers_reach_real_processing_and_unlock_lore(client, quiz_key, quiz_id):
+async def test_conference_voice_and_text_answers_reach_real_processing_and_unlock_lore(client, quiz_key, quiz_id, question_count):
     with SessionLocal() as db:
         seed_conference_quiz(db, quiz_key)
         for material in db.query(Material).filter(Material.test_id == quiz_id).all():
@@ -131,8 +137,8 @@ async def test_conference_voice_and_text_answers_reach_real_processing_and_unloc
         assert client.get(f"/public/{other_quiz}/attempts/{attempt_id}/questions/{question['id']}/explanation", headers=headers).status_code == 404
     result = client.get(f"/attempts/{attempt_id}", headers=headers).json()
     assert result["status"] == "completed"
-    assert len(result["answers"]) == 5
-    assert result["max_score"] == 50
+    assert len(result["answers"]) == question_count
+    assert result["max_score"] == question_count * 10
     assert result["total_score"] == sum(answer["score"] for answer in result["answers"])
 
 
@@ -153,7 +159,7 @@ def test_conference_guests_cannot_read_each_others_attempts_or_change_reference_
     assert client.post(f"/attempts/{second['attempt']['id']}/questions/{question_id}/text", headers=headers, json={"text": "Черемша"}).status_code == 201
 
 
-def test_conference_guest_cleanup_keeps_prepared_quiz_and_materials(client, quiz_key, quiz_id):
+def test_conference_guest_cleanup_keeps_prepared_quiz_and_materials(client, quiz_key, quiz_id, question_count):
     with SessionLocal() as db:
         seed_conference_quiz(db, quiz_key)
     session = client.post(f"/public/{quiz_key}/start").json()
@@ -166,8 +172,8 @@ def test_conference_guest_cleanup_keeps_prepared_quiz_and_materials(client, quiz
         assert db.get(Attempt, session["attempt"]["id"]) is None
         assert db.query(Answer).count() == 0
         assert db.get(DbTest, quiz_id) is not None
-        assert db.query(Question).filter(Question.test_id == quiz_id).count() == 5
-        assert db.query(Material).filter(Material.test_id == quiz_id).count() == 5
+        assert db.query(Question).filter(Question.test_id == quiz_id).count() == question_count
+        assert db.query(Material).filter(Material.test_id == quiz_id).count() == question_count
 
 
 def test_conference_quiz_reports_unseeded_disabled_and_capacity_states(client, monkeypatch, quiz_key, quiz_id):

@@ -2149,6 +2149,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
               <div className={conferenceStyles.selector} role="group" aria-label="Выбор теста YaC/e">
                 <button type="button" aria-pressed={conferenceQuiz === "memes"} onClick={() => setConferenceQuiz("memes")}>Мемы</button>
                 <button type="button" aria-pressed={conferenceQuiz === "education"} onClick={() => setConferenceQuiz("education")}>Образование</button>
+                <button type="button" aria-pressed={conferenceQuiz === "neuromemes"} onClick={() => setConferenceQuiz("neuromemes")}>Нейромемы</button>
               </div>
               <ConferenceQuiz key={conferenceQuiz} quiz={conferenceQuiz} />
             </section>
