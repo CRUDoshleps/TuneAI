@@ -921,6 +921,16 @@
 
   .landing-card .landing-nav {
     min-height: 66px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    padding-top: 10px;
+  }
+
+  .landing-card .landing-nav nav {
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    gap: 24px;
   }
 
   .landing-card .landing-nav .nav-pill {

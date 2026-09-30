@@ -2,10 +2,8 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { ArrowRight, Clock, Mic } from "lucide-react";
-import BrandMark from "./BrandMark";
-import { Recorder } from "./TuneAIApp";
+import Recorder from "./Recorder";
 import { apiFetch, getUserErrorMessage, type Attempt } from "../lib/api";
 import styles from "./MemeQuiz.module.css";
 
@@ -123,12 +121,7 @@ export default function MemeQuiz() {
   }
 
   return (
-    <main className={styles.page}>
-      <header className={styles.header}>
-        <Link className={styles.brand} href="/"><BrandMark />TuneAI</Link>
-        <Link className={styles.home} href="/">На главную</Link>
-        <a className={styles.event} href="https://yace.yandex.ru/" target="_blank" rel="noreferrer">yac<span>e</span><small>2026 ↗</small></a>
-      </header>
+    <section className={styles.page}>
       <section className={styles.hero}>
         <div className={styles.copy}>
           <div className={styles.sticker}>Зачёт по мемам <span>✦</span></div>
@@ -178,7 +171,7 @@ export default function MemeQuiz() {
           <span className={styles.star} aria-hidden="true">✳</span>
         </div>
       </section>
-      <footer className={styles.footer}><Link href="/">TuneAI</Link><span>Иллюстрации по мотивам мемов: <a href="https://memepedia.ru/cheremsha/" target="_blank" rel="noreferrer">Memepedia</a>, <a href="https://media.halvacard.ru/entertainment/populiarnye-memy-2026" target="_blank" rel="noreferrer">Халва Медиа</a></span></footer>
-    </main>
+      <footer className={styles.footer}><span>Иллюстрации по мотивам мемов: <a href="https://memepedia.ru/cheremsha/" target="_blank" rel="noreferrer">Memepedia</a>, <a href="https://media.halvacard.ru/entertainment/populiarnye-memy-2026" target="_blank" rel="noreferrer">Халва Медиа</a></span></footer>
+    </section>
   );
 }
