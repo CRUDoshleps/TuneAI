@@ -1,4 +1,5 @@
 import secrets
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,55 +13,53 @@ from app.deps import get_current_user
 from app.models import Answer, AnswerStatusEnum, Assignment, Attempt, RoleEnum, Test, TestStatusEnum, User
 from app.schemas import AttemptRead, AttemptStartRequest, TokenPair
 from app.services.demo_cleanup import cleanup_expired_demo_data, demo_expiration, recent_demo_user_count
-from app.services.meme_quiz import MEME_QUESTIONS, MEME_TEST_ID
+from app.services.conference_quiz import QUIZZES
 
 
-router = APIRouter(prefix="/public/memes", tags=["public"])
+router = APIRouter(prefix="/public", tags=["public"])
 
 
-class MemeSessionRead(BaseModel):
+class ConferenceSessionRead(BaseModel):
     tokens: TokenPair
     attempt: AttemptRead
 
 
-def _quiz(db: Session) -> Test:
+def _quiz(db: Session, quiz_key: str) -> Test:
     if not get_settings().demo_bootstrap_enabled:
-        raise HTTPException(status_code=404, detail="Мемный зачёт недоступен")
-    test = db.get(Test, MEME_TEST_ID)
+        raise HTTPException(status_code=404, detail="Зачёт недоступен")
+    test = db.get(Test, QUIZZES[quiz_key]["id"])
     if test is None or test.status != TestStatusEnum.published:
-        raise HTTPException(status_code=503, detail="Мемный зачёт ещё не подготовлен")
+        raise HTTPException(status_code=503, detail="Зачёт ещё не подготовлен")
     return test
 
 
-@router.get("")
-def meme_quiz(db: Session = Depends(get_db)) -> dict:
-    test = _quiz(db)
-    return {
-        "title": test.title,
-        "questions": [
-            {
-                "id": question.id,
-                "text": question.text,
-                "order_index": question.order_index,
-                "image": f'/memes/{MEME_QUESTIONS[question.order_index]["image"]}',
-                "alt": MEME_QUESTIONS[question.order_index]["alt"],
-                "hint": MEME_QUESTIONS[question.order_index]["hint"],
-            }
-            for question in sorted(test.questions, key=lambda q: q.order_index)
-        ],
-    }
+@router.get("/{quiz_key}")
+def conference_quiz(quiz_key: Literal["memes", "education"], db: Session = Depends(get_db)) -> dict:
+    test = _quiz(db, quiz_key)
+    questions = []
+    for question in sorted(test.questions, key=lambda q: q.order_index):
+        item = QUIZZES[quiz_key]["questions"][question.order_index]
+        questions.append({
+            "id": question.id,
+            "text": question.text,
+            "order_index": question.order_index,
+            "image": f'/memes/{item["image"]}' if "image" in item else None,
+            "alt": item.get("alt", ""),
+            "hint": item["hint"],
+        })
+    return {"title": test.title, "questions": questions}
 
 
-@router.post("/start", response_model=MemeSessionRead, status_code=201)
-def start_meme_quiz(db: Session = Depends(get_db)) -> MemeSessionRead:
-    test = _quiz(db)
+@router.post("/{quiz_key}/start", response_model=ConferenceSessionRead, status_code=201)
+def start_conference_quiz(quiz_key: Literal["memes", "education"], db: Session = Depends(get_db)) -> ConferenceSessionRead:
+    test = _quiz(db, quiz_key)
     settings = get_settings()
     cleanup_expired_demo_data(db)
     if recent_demo_user_count(db) >= settings.demo_bootstrap_limit_per_hour:
         raise HTTPException(status_code=429, detail="Слишком много участников. Попробуйте чуть позже.")
     user = User(
-        email=f"meme-guest-{secrets.token_hex(16)}@tuneai.dev",
-        full_name="Участник мемного зачёта",
+        email=f"{quiz_key}-guest-{secrets.token_hex(16)}@tuneai.dev",
+        full_name=f"Участник зачёта «{test.title}»",
         hashed_password=hash_password(secrets.token_urlsafe(32)),
         role=RoleEnum.examinee,
         is_demo=True,
@@ -71,25 +70,26 @@ def start_meme_quiz(db: Session = Depends(get_db)) -> MemeSessionRead:
     db.add(Assignment(test_id=test.id, user_id=user.id, created_by_id=test.owner_id))
     db.commit()
     attempt = start_attempt(AttemptStartRequest(test_id=test.id), db, user)
-    return MemeSessionRead(
+    return ConferenceSessionRead(
         tokens=TokenPair(access_token=create_token(user.id, "access"), refresh_token=create_token(user.id, "refresh")),
         attempt=attempt,
     )
 
 
-@router.get("/attempts/{attempt_id}/questions/{question_id}/explanation")
-def meme_explanation(
+@router.get("/{quiz_key}/attempts/{attempt_id}/questions/{question_id}/explanation")
+def conference_explanation(
+    quiz_key: Literal["memes", "education"],
     attempt_id: str,
     question_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
     attempt = db.get(Attempt, attempt_id)
-    if attempt is None or attempt.test_id != MEME_TEST_ID or attempt.user_id != user.id:
+    if attempt is None or attempt.test_id != QUIZZES[quiz_key]["id"] or attempt.user_id != user.id:
         raise HTTPException(status_code=404, detail="Попытка не найдена")
     answer = db.query(Answer).filter(Answer.attempt_id == attempt.id, Answer.question_id == question_id).one_or_none()
     if answer is None or answer.status != AnswerStatusEnum.completed:
         raise HTTPException(status_code=409, detail="Сначала дождитесь проверки ответа")
     question = answer.question
-    item = MEME_QUESTIONS[question.order_index]
+    item = QUIZZES[quiz_key]["questions"][question.order_index]
     return {"name": item["name"], "explanation": question.explanation, "expected_answer": question.expected_answer, "source": item["source"]}

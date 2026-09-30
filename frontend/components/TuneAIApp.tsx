@@ -77,7 +77,8 @@ import {
   User
 } from "../lib/api";
 import BrandMark from "./BrandMark";
-import MemeQuiz from "./MemeQuiz";
+import ConferenceQuiz, { type ConferenceQuizKind } from "./ConferenceQuiz";
+import conferenceStyles from "./ConferenceQuiz.module.css";
 import Recorder from "./Recorder";
 import { FeedbackScreen } from "./ProductScreens";
 
@@ -463,6 +464,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [, setStatus] = useState<string>("Готово к работе");
   const [error, setError] = useState<string>("");
+  const [conferenceQuiz, setConferenceQuiz] = useState<ConferenceQuizKind>("memes");
   const [publicView, setPublicView] = useState<PublicView>("home");
   const openPublicView = (view: PublicView) => {
     if (view === "demo" && publicView !== "demo") {
@@ -2143,7 +2145,13 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
               {error && <div className="banner error demo-error" role="alert">{error}</div>}
             </section>
           ) : publicView === "yace" ? (
-            <MemeQuiz />
+            <section>
+              <div className={conferenceStyles.selector} role="group" aria-label="Выбор теста YaC/e">
+                <button type="button" aria-pressed={conferenceQuiz === "memes"} onClick={() => setConferenceQuiz("memes")}>Мемы</button>
+                <button type="button" aria-pressed={conferenceQuiz === "education"} onClick={() => setConferenceQuiz("education")}>Образование</button>
+              </div>
+              <ConferenceQuiz key={conferenceQuiz} quiz={conferenceQuiz} />
+            </section>
           ) : (
             <section className="auth-page" aria-labelledby="auth-page-title">
               <div className="auth-page-intro">

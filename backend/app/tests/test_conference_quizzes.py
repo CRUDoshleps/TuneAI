@@ -7,27 +7,41 @@ import pytest
 from app.db.session import SessionLocal
 from app.models import Answer, Attempt, Material, OutboxEvent, Question, Test as DbTest, User
 from app.services.demo_cleanup import cleanup_expired_demo_data
-from app.services.meme_quiz import MEME_TEST_ID, seed_meme_quiz
+from app.services.conference_quiz import QUIZZES, seed_conference_quiz
 from app.services.outbox import ANSWER_UPLOADED, MATERIAL_UPLOADED
 from app.services.processing import process_answer_uploaded
 from app.services.rag import index_material
 from app.tests.conftest import auth_header
 
 
-def test_meme_seed_preserves_five_prepared_questions_on_repeat(client):
+@pytest.fixture(params=["memes", "education"])
+def quiz_key(request):
+    return request.param
+
+
+@pytest.fixture
+def quiz_id(quiz_key):
+    return QUIZZES[quiz_key]["id"]
+
+
+def test_conference_seed_preserves_five_prepared_questions_on_repeat(client, quiz_key, quiz_id):
     with SessionLocal() as db:
-        test = seed_meme_quiz(db)
+        test = seed_conference_quiz(db, quiz_key)
         ids = [question.id for question in test.questions]
-        seed_meme_quiz(db)
+        seed_conference_quiz(db, quiz_key)
         assert [question.id for question in test.questions] == ids
-        assert db.query(Question).filter(Question.test_id == MEME_TEST_ID).count() == 5
+        assert db.query(Question).filter(Question.test_id == quiz_id).count() == 5
         answers = [q.expected_answer for q in sorted(test.questions, key=lambda q: q.order_index)]
-        for expected, fragment in zip(answers, ["черемша", "Пиббл", "пухососы", "Вернера Херцога", "стриме Коляки"]):
+        fragments = {
+            "memes": ["черемша", "Пиббл", "пухососы", "Вернера Херцога", "стриме Коляки"],
+            "education": ["рынок труда", "Запоминание", "фундаментальность", "советский период", "Минпросвещения"],
+        }
+        for expected, fragment in zip(answers, fragments[quiz_key]):
             assert fragment in expected
-        assert db.query(Material).filter(Material.test_id == MEME_TEST_ID).count() == 5
+        assert db.query(Material).filter(Material.test_id == quiz_id).count() == 5
         assert db.query(OutboxEvent).filter(OutboxEvent.event_type == MATERIAL_UPLOADED).count() == 5
         assert test.expires_at is None and not test.is_demo
-    catalog = client.get("/public/memes")
+    catalog = client.get(f"/public/{quiz_key}")
     assert catalog.status_code == 200
     assert len(catalog.json()["questions"]) == 5
     assert "expected_answer" not in catalog.text
@@ -35,13 +49,13 @@ def test_meme_seed_preserves_five_prepared_questions_on_repeat(client):
 
 
 @pytest.mark.asyncio
-async def test_meme_voice_and_text_answers_reach_real_processing_and_unlock_lore(client):
+async def test_conference_voice_and_text_answers_reach_real_processing_and_unlock_lore(client, quiz_key, quiz_id):
     with SessionLocal() as db:
-        seed_meme_quiz(db)
-        for material in db.query(Material).filter(Material.test_id == MEME_TEST_ID).all():
+        seed_conference_quiz(db, quiz_key)
+        for material in db.query(Material).filter(Material.test_id == quiz_id).all():
             await index_material(db, material.id)
-    catalog = client.get("/public/memes").json()
-    response = client.post("/public/memes/start")
+    catalog = client.get(f"/public/{quiz_key}").json()
+    response = client.post(f"/public/{quiz_key}/start")
     assert response.status_code == 201, response.text
     session = response.json()
     headers = auth_header(session["tokens"]["access_token"])
@@ -50,7 +64,7 @@ async def test_meme_voice_and_text_answers_reach_real_processing_and_unlock_lore
     assert "expected_answer" not in response.text
     for index, question in enumerate(catalog["questions"]):
         base = f"/attempts/{attempt_id}/questions/{question['id']}"
-        explanation = f"/public/memes/attempts/{attempt_id}/questions/{question['id']}/explanation"
+        explanation = f"/public/{quiz_key}/attempts/{attempt_id}/questions/{question['id']}/explanation"
         assert client.get(explanation, headers=headers).status_code == 409
         if index == 0:
             audio = io.BytesIO()
@@ -74,6 +88,8 @@ async def test_meme_voice_and_text_answers_reach_real_processing_and_unlock_lore
         assert revealed.status_code == 200
         assert revealed.json()["expected_answer"]
         assert revealed.json()["explanation"]
+        other_quiz = "education" if quiz_key == "memes" else "memes"
+        assert client.get(f"/public/{other_quiz}/attempts/{attempt_id}/questions/{question['id']}/explanation", headers=headers).status_code == 404
     result = client.get(f"/attempts/{attempt_id}", headers=headers).json()
     assert result["status"] == "completed"
     assert len(result["answers"]) == 5
@@ -81,27 +97,27 @@ async def test_meme_voice_and_text_answers_reach_real_processing_and_unlock_lore
     assert result["total_score"] == sum(answer["score"] for answer in result["answers"])
 
 
-def test_meme_guests_cannot_read_each_others_attempts_or_change_reference_answers(client):
+def test_conference_guests_cannot_read_each_others_attempts_or_change_reference_answers(client, quiz_key, quiz_id):
     with SessionLocal() as db:
-        seed_meme_quiz(db)
-    first = client.post("/public/memes/start").json()
-    second = client.post("/public/memes/start").json()
+        seed_conference_quiz(db, quiz_key)
+    first = client.post(f"/public/{quiz_key}/start").json()
+    second = client.post(f"/public/{quiz_key}/start").json()
     headers = auth_header(second["tokens"]["access_token"])
     attempt_id = first["attempt"]["id"]
     question_id = first["attempt"]["questions"][0]["id"]
     assert first["attempt"]["user_id"] != second["attempt"]["user_id"]
     assert client.get(f"/attempts/{attempt_id}", headers=headers).status_code == 403
-    assert client.get(f"/public/memes/attempts/{attempt_id}/questions/{question_id}/explanation", headers=headers).status_code == 404
-    assert client.patch(f"/tests/{MEME_TEST_ID}/questions/{question_id}", headers=headers, json={"expected_answer": "Wrong reference"}).status_code == 403
+    assert client.get(f"/public/{quiz_key}/attempts/{attempt_id}/questions/{question_id}/explanation", headers=headers).status_code == 404
+    assert client.patch(f"/tests/{quiz_id}/questions/{question_id}", headers=headers, json={"expected_answer": "Wrong reference"}).status_code == 403
     tests = client.get("/tests", headers=headers).json()
     assert len(tests) == 1 and tests[0]["questions"] == []
     assert client.post(f"/attempts/{second['attempt']['id']}/questions/{question_id}/text", headers=headers, json={"text": "Черемша"}).status_code == 201
 
 
-def test_meme_guest_cleanup_keeps_prepared_quiz_and_materials(client):
+def test_conference_guest_cleanup_keeps_prepared_quiz_and_materials(client, quiz_key, quiz_id):
     with SessionLocal() as db:
-        seed_meme_quiz(db)
-    session = client.post("/public/memes/start").json()
+        seed_conference_quiz(db, quiz_key)
+    session = client.post(f"/public/{quiz_key}/start").json()
     with SessionLocal() as db:
         user = db.get(User, session["attempt"]["user_id"])
         user.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -110,25 +126,48 @@ def test_meme_guest_cleanup_keeps_prepared_quiz_and_materials(client):
         assert db.get(User, session["attempt"]["user_id"]) is None
         assert db.get(Attempt, session["attempt"]["id"]) is None
         assert db.query(Answer).count() == 0
-        assert db.get(DbTest, MEME_TEST_ID) is not None
-        assert db.query(Question).filter(Question.test_id == MEME_TEST_ID).count() == 5
-        assert db.query(Material).filter(Material.test_id == MEME_TEST_ID).count() == 5
+        assert db.get(DbTest, quiz_id) is not None
+        assert db.query(Question).filter(Question.test_id == quiz_id).count() == 5
+        assert db.query(Material).filter(Material.test_id == quiz_id).count() == 5
 
 
-def test_meme_quiz_reports_unseeded_disabled_and_capacity_states(client, monkeypatch):
+def test_conference_quiz_reports_unseeded_disabled_and_capacity_states(client, monkeypatch, quiz_key, quiz_id):
     from app.core.config import get_settings
 
-    assert client.get("/public/memes").status_code == 503
-    assert client.post("/public/memes/start").status_code == 503
+    assert client.get(f"/public/{quiz_key}").status_code == 503
+    assert client.post(f"/public/{quiz_key}/start").status_code == 503
     with SessionLocal() as db:
-        seed_meme_quiz(db)
+        seed_conference_quiz(db, quiz_key)
     get_settings.cache_clear()
     monkeypatch.setenv("DEMO_BOOTSTRAP_LIMIT_PER_HOUR", "0")
     try:
-        assert client.post("/public/memes/start").status_code == 429
+        assert client.post(f"/public/{quiz_key}/start").status_code == 429
         monkeypatch.setenv("DEMO_BOOTSTRAP_ENABLED", "false")
         get_settings.cache_clear()
-        assert client.get("/public/memes").status_code == 404
-        assert client.post("/public/memes/start").status_code == 404
+        assert client.get(f"/public/{quiz_key}").status_code == 404
+        assert client.post(f"/public/{quiz_key}/start").status_code == 404
     finally:
         get_settings.cache_clear()
+
+
+def test_education_seed_preserves_existing_meme_answers_and_separates_materials(client):
+    with SessionLocal() as db:
+        memes = seed_conference_quiz(db, "memes")
+        original_id = memes.questions[0].id
+        memes.questions[0].expected_answer = "Существующий эталон."
+        db.commit()
+        education = seed_conference_quiz(db, "education")
+        seed_conference_quiz(db, "memes")
+        assert memes.questions[0].id == original_id
+        assert memes.questions[0].expected_answer == "Существующий эталон."
+        assert education.id != memes.id
+        assert {q.id for q in memes.questions}.isdisjoint({q.id for q in education.questions})
+        assert db.query(Question).count() == 10
+        assert db.query(Material).count() == 10
+        for question in education.questions:
+            material = db.query(Material).filter(Material.question_id == question.id).one()
+            assert material.test_id == education.id
+            assert f"Раздел {question.order_index + 1}." in material.content
+            assert "Черемша" not in material.content
+    assert all(q["image"] is None for q in client.get("/public/education").json()["questions"])
+    assert all(q["image"] for q in client.get("/public/memes").json()["questions"])
