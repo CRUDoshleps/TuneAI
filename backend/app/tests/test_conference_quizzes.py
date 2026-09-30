@@ -5,12 +5,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.db.session import SessionLocal
-from app.models import Answer, Attempt, Material, OutboxEvent, Question, Test as DbTest, User
+from app.models import Answer, Attempt, Material, MaterialChunk, MaterialIndexStatusEnum, OutboxEvent, Question, Test as DbTest, User
 from app.services.demo_cleanup import cleanup_expired_demo_data
 from app.services.conference_quiz import QUIZZES, seed_conference_quiz
 from app.services.outbox import ANSWER_UPLOADED, MATERIAL_UPLOADED
 from app.services.processing import process_answer_uploaded
-from app.services.rag import index_material
+from app.services.rag import index_material, retrieve_context
 from app.tests.conftest import auth_header
 
 
@@ -33,7 +33,7 @@ def test_conference_seed_preserves_five_prepared_questions_on_repeat(client, qui
         assert db.query(Question).filter(Question.test_id == quiz_id).count() == 5
         answers = [q.expected_answer for q in sorted(test.questions, key=lambda q: q.order_index)]
         fragments = {
-            "memes": ["черемша", "Пиббл", "пухососы", "Вернера Херцога", "стриме Коляки"],
+            "memes": ["черемша", "Минут 10–15", "пухососы", "Вернера Херцога", "стриме Коляки"],
             "education": ["рынок труда", "Запоминание", "фундаментальность", "советский период", "Минпросвещения"],
         }
         for expected, fragment in zip(answers, fragments[quiz_key]):
@@ -46,6 +46,45 @@ def test_conference_seed_preserves_five_prepared_questions_on_repeat(client, qui
     assert len(catalog.json()["questions"]) == 5
     assert "expected_answer" not in catalog.text
     assert "explanation" not in catalog.text
+
+
+@pytest.mark.asyncio
+async def test_meme_replacement_updates_existing_reference_and_removes_old_rag_context(client):
+    with SessionLocal() as db:
+        test = seed_conference_quiz(db, "memes")
+        question = sorted(test.questions, key=lambda q: q.order_index)[1]
+        question_id = question.id
+        question.expected_answer = "Это Пиббл — белый пёс на сёрфе."
+        question.explanation = "Беззаботный пёс из нейросетевых видео."
+        test.criteria = {**test.criteria, "rubric": "Обязательно назвать автора и год."}
+        material = db.query(Material).filter(Material.question_id == question.id).one()
+        material.title = "Пиббл"
+        material.content = question.expected_answer
+        db.commit()
+        await index_material(db, material.id)
+        assert db.query(MaterialChunk).filter(MaterialChunk.material_id == material.id).count() > 0
+
+        seed_conference_quiz(db, "memes")
+        assert question.id == question_id
+        assert "путается в числах" in question.expected_answer
+        assert "Пиббл" not in question.explanation
+        assert "8–10 баллов" in test.criteria["rubric"]
+        assert material.index_status == MaterialIndexStatusEnum.pending
+        assert material.version == 2
+        assert material.chunk_count == 0
+        assert db.query(MaterialChunk).filter(MaterialChunk.material_id == material.id).count() == 0
+        assert db.query(OutboxEvent).filter(OutboxEvent.event_type == MATERIAL_UPLOADED).count() == 6
+        seed_conference_quiz(db, "memes")
+        assert material.version == 2
+        assert db.query(OutboxEvent).filter(OutboxEvent.event_type == MATERIAL_UPLOADED).count() == 6
+
+        await index_material(db, material.id)
+        context = await retrieve_context(db, test_id=test.id, question_id=question.id, query="путается во времени", material_policy="question_only")
+        assert context and all("Пиббл" not in chunk for chunk in context)
+        assert any("путается в числах" in chunk for chunk in context)
+    question = client.get("/public/memes").json()["questions"][1]
+    assert question["id"] == question_id
+    assert question["image"] == "/memes/minutes.jpg"
 
 
 @pytest.mark.asyncio
