@@ -14,7 +14,7 @@ QUIZZES = {
     "memes": {
         "title": "Зачёт по мемам",
         "description": "Пять мемов: узнайте героя и расскажите его историю.",
-        "rubric": "Оценить узнавание мема и понимание его истории. Название или верное описание героя — 4 балла, происхождение — 3, смысл — 3. Принимать пересказ своими словами и варианты написания. Не требовать дословной цитаты, точного года или имени автора, если смысл передан верно.",
+        "rubric": "Оценивать узнавание мема и понимание шутки. Верная фраза, название или узнаваемое описание ситуации — до 5 баллов, объяснение смысла своими словами — до 5 баллов. Короткий ответ, верно передающий мем и его смысл, заслуживает 8–10 баллов, в том числе близкий по смыслу к примеру ответа. Частичное узнавание или частичное понимание оценивать частичными баллами. Не требовать дословной цитаты, точного порядка чисел, полного названия, года, автора или истории появления. Отсутствие этих деталей не снижает оценку. Ноль — только если в ответе нет ни узнавания мема, ни верного понимания смысла.",
         "competencies": ["Узнавание мема", "История и смысл"],
         "questions_file": "meme_questions.json",
     },
@@ -35,6 +35,24 @@ def seed_conference_quiz(db: Session, quiz_key: str) -> Test:
     quiz = QUIZZES[quiz_key]
     existing = db.get(Test, quiz["id"])
     if existing is not None:
+        if quiz_key == "memes":
+            existing.criteria = {**existing.criteria, "rubric": quiz["rubric"]}
+            item = quiz["questions"][1]
+            question = db.get(Question, str(uuid5(NAMESPACE_URL, "tuneai:memes:2026:1")))
+            question.text = item["title"]
+            question.expected_answer = item["expected_answer"]
+            question.explanation = item["explanation"]
+            material = db.query(Material).filter(Material.question_id == question.id, Material.test_id == existing.id).one()
+            if material.title != item["name"] or material.content != item["material"]:
+                material.title = item["name"]
+                material.content = item["material"]
+                material.version += 1
+                material.chunks.clear()
+                material.chunk_count = 0
+                material.index_status = MaterialIndexStatusEnum.pending
+                material.index_error = None
+                add_outbox_event(db, MATERIAL_UPLOADED, material.id, {"material_id": material.id, "test_id": existing.id})
+            db.commit()
         return existing
     owner = User(
         email=f"{quiz_key}-owner@tuneai.dev",
