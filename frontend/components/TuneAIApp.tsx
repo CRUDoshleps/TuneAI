@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -2015,6 +2016,7 @@ export default function TuneAIApp({ mode: appMode = "full" }: { mode?: "full" | 
                       <Mic size={17} /> Попробовать ответ
                     </button>
                     <button className="landing-text-action" type="button" onClick={openLoginView}>У меня есть аккаунт</button>
+                    <Link className="landing-text-action" href="/memes">Зачёт по мемам →</Link>
                   </div>
                   <p className="landing-trust"><Shield size={16} /> Спорные оценки остаются на проверке у преподавателя.</p>
                 </div>
@@ -4017,7 +4019,7 @@ function ChoiceSubmitter({
   );
 }
 
-function Recorder({
+export function Recorder({
   disabled,
   onUpload,
   onError
@@ -4027,12 +4029,26 @@ function Recorder({
   onError: (message: string) => void;
 }) {
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const mountedRef = useRef(true);
   const chunksRef = useRef<Blob[]>([]);
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const recorder = recorderRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        if (recorder.state !== "inactive") recorder.stop();
+        recorder.stream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!recording) return;
@@ -4050,6 +4066,10 @@ function Recorder({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       chunksRef.current = [];
       setSeconds(0);
       setRecordedBlob(null);
